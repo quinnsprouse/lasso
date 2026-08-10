@@ -76,11 +76,16 @@ const main = async (): Promise<number> => {
       "run without --wizard; use describe --json for machine-readable discovery",
     )
   }
-  if (preTerminator.includes("--completions") && mode.format !== "text") {
-    return usage(
-      "--completions emits a raw shell script and is only available in text mode",
-      "run without --json/--format to install completions",
-    )
+  if (preTerminator.includes("--completions")) {
+    if (mode.explicitFormat && mode.format !== "text") {
+      return usage(
+        "--completions emits a raw shell script, not envelopes",
+        "drop --json/--format (completions are normally piped to a file)",
+      )
+    }
+    // Piped stdout auto-negotiates JSON, but a completion script IS raw
+    // output — force text so `lasso --completions bash > file` works.
+    mode = { ...mode, format: "text" }
   }
 
   // Explicit help in a machine format answers with `describe` data directly —

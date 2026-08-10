@@ -95,6 +95,12 @@ describe("terminator and conflicts", () => {
     )
   })
 
+  it("distinguishes explicit formats from auto-detection", () => {
+    expect(negotiate({ ...base, stdoutIsTTY: false }).explicitFormat).toBe(false)
+    expect(negotiate({ ...base, argv: ["--json"] }).explicitFormat).toBe(true)
+    expect(negotiate({ ...base, env: { LASSO_FORMAT: "json" } }).explicitFormat).toBe(true)
+  })
+
   it("records an explicit help request", () => {
     expect(negotiate({ ...base, argv: ["--help"] }).helpRequested).toBe(true)
     expect(negotiate({ ...base, argv: ["--", "--help"] }).helpRequested).toBe(false)

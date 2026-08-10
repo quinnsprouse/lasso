@@ -16,6 +16,8 @@ export interface OutputMode {
   readonly argv: ReadonlyArray<string>
   /** True when `--help`/`-h` appeared before any `--` terminator. */
   readonly helpRequested: boolean
+  /** True when the format came from an explicit flag or LASSO_FORMAT, not auto-detection. */
+  readonly explicitFormat: boolean
 }
 
 const FORMAT_VALUES: ReadonlyArray<OutputFormat> = ["auto", "json", "text", "ndjson"]
@@ -113,6 +115,7 @@ export const negotiate = (options: NegotiateOptions): OutputMode => {
     color,
     argv: rest,
     helpRequested,
+    explicitFormat: format !== undefined && format !== "auto",
   }
 
   if (error !== undefined) {

@@ -14,6 +14,7 @@ const mode = (format: OutputMode["format"], color = false): OutputMode => ({
   color,
   argv: [],
   helpRequested: false,
+  explicitFormat: true,
 })
 
 const ok: Outcome = {

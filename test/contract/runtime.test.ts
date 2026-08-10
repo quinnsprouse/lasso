@@ -149,7 +149,14 @@ const invoke = async (
   format: OutputMode["format"] = "json",
   tasks: ReadonlyArray<Task> = [seedTask],
 ): Promise<Invocation> => {
-  const mode: OutputMode = { format, noInput: true, color: false, argv, helpRequested: false }
+  const mode: OutputMode = {
+    format,
+    noInput: true,
+    color: false,
+    argv,
+    helpRequested: false,
+    explicitFormat: true,
+  }
   const out: Array<string> = []
   const err: Array<string> = []
 

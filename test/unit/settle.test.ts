@@ -17,6 +17,7 @@ const mode = (format: OutputMode["format"]): OutputMode => ({
   color: false,
   argv: [],
   helpRequested: false,
+  explicitFormat: true,
 })
 
 const exitOf = (effect: Effect.Effect<void, unknown>): Promise<Exit.Exit<void, unknown>> =>

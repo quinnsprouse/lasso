@@ -188,7 +188,7 @@ describe("mutation protocol", () => {
 })
 
 describe("machine-mode built-ins", () => {
-  it("refuses the wizard and completions in machine formats", async () => {
+  it("refuses the wizard and explicit-machine completions", async () => {
     const wizard = await run(["task", "create", "--wizard", "--json"])
     expect(wizard.exitCode).toBe(64)
     expect(parse(wizard.stdout).error.code).toBe("invalid_usage")
@@ -196,6 +196,13 @@ describe("machine-mode built-ins", () => {
     const completions = await run(["--completions", "sh", "--json"])
     expect(completions.exitCode).toBe(64)
     expect(parse(completions.stdout).error.code).toBe("invalid_usage")
+  })
+
+  it("piped completions emit the raw script — the normal install path works", async () => {
+    const result = await run(["--completions", "bash"])
+    expect(result.exitCode).toBe(0)
+    expect(result.stdout).toContain("complete")
+    expect(result.stdout).not.toContain("schemaVersion")
   })
 
   it("--version in ndjson mode is a summary event", async () => {
