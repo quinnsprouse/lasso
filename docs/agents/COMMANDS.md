@@ -54,7 +54,7 @@ defineMutation({
 })
 ```
 
-`apply` never sees the original input: anything that changes what apply does must live in the plan, because the confirmation token binds `{command, schemaVersion, plan}` and nothing else. Plans must be DETERMINISTIC for identical state and input — confirmation replays the planner and compares tokens, so apply-assigned metadata (timestamps, generated ids) stays out of the plan; the token binds intent. Model conditional no-ops (like `--if-not-exists` on an existing resource) as a plan variant. `plan` runs with read capabilities (`StoreReader`); `apply` gets write capabilities (`StoreWriter`) — writing during planning does not typecheck.
+`apply` never sees the original input — anything that changes what apply does lives in the plan, because the token binds `{command, schemaVersion, plan}`. Plans are deterministic for identical state and input (replay recomputes and compares tokens), so apply-assigned metadata like timestamps stays out; model conditional no-ops as plan variants. `plan` gets read capabilities, `apply` gets write — crossing over does not typecheck.
 
 Rules enforced mechanically (type system where possible, contract-invariant tests otherwise):
 
