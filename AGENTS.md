@@ -22,7 +22,6 @@ Put disposable experiments in `.scratch/` or the OS temp directory, never the re
 Open these only when relevant:
 
 - [Domain language](CONTEXT.md) — CommandContract, Output Protocol, Verification Profiles, Starter Contract
-- [Architecture decisions](docs/adr/README.md) — load-bearing decisions, concise format
 - [Adding commands](docs/agents/COMMANDS.md) — contract fields, params, error taxonomy
 - [Output protocol](docs/agents/PROTOCOL.md) — envelopes, exit codes, NDJSON, confirmation flow
 - [Effect patterns](docs/agents/EFFECT.md) — approved patterns, banned escape hatches, `node_modules/effect/AGENTS.md`

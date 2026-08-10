@@ -3,7 +3,7 @@ import { defineConfig } from "tsdown"
 export default defineConfig({
   entry: { bin: "src/bin.ts" },
   // CJS is deliberate: Effect's minified ESM bundle breaks on a transitive
-  // dynamic require (undici via the platform HTTP client). See ADR 0002.
+  // dynamic require (undici via the platform HTTP client).
   format: "cjs",
   platform: "node",
   target: "node22",

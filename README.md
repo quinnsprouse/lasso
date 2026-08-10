@@ -67,7 +67,7 @@ Effect 4 (beta, exact-pinned) · effect/unstable/cli behind a kit-owned adapter 
 
 ## Docs
 
-`AGENTS.md` is the agent entry point (CLAUDE.md symlinks to it). Progressive disclosure in `docs/agents/`; load-bearing decisions in `docs/adr/`; domain language in `CONTEXT.md`.
+`AGENTS.md` is the agent entry point (CLAUDE.md symlinks to it). Progressive disclosure in `docs/agents/`; domain language in `CONTEXT.md`.
 
 ## License
 
