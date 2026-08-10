@@ -17,7 +17,7 @@ jobs:
         include:
           # The minimum advertised runtime is verified on one platform.
           - os: ubuntu-latest
-            node: 22.18.0
+            node: 22.19.0
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1

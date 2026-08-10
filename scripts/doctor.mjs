@@ -42,8 +42,8 @@ const versionAtLeast = (actual, wanted) => {
 
 check("node version", () => {
   const version = process.version.slice(1)
-  if (!versionAtLeast(version, "22.18.0")) {
-    fail(`node ${version} is below the required 22.18`, "install Node 24 LTS")
+  if (!versionAtLeast(version, "22.19.0")) {
+    fail(`node ${version} is below the required 22.19`, "install Node 24 LTS")
   }
   return `node ${version}`
 })

@@ -6,7 +6,7 @@ Each command is one contract that generates its parsing, help, schemas, and docs
 
 ## Quick start
 
-Use Node 22.18 or newer, npm 10 or newer, and Git.
+Use Node 22.19 or newer, npm 10 or newer, and Git.
 
 ```bash
 npx degit quinnsprouse/lasso my-cli
