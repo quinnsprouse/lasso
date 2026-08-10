@@ -67,7 +67,7 @@
       }
     },
     {
-      "files": ["scripts/**", "test/**"],
+      "files": ["scripts/**", "test/**", ".claude/**"],
       "rules": {
         "no-console": "off",
         "no-restricted-imports": "off",
