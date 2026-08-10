@@ -26,7 +26,7 @@ The one distinction to branch on hardest: 75 and `"transient": true` mean retry;
 
 ## NDJSON (`--format ndjson`)
 
-One event object per line: `item`, `warning`, `summary`, `confirmation_required`, `error`. Every stream ends with exactly one terminal event (`summary`, `confirmation_required`, or `error`). Collections stream items individually; `--fields id,title` projects item fields against the command's static field inventory — unknown fields fail identically on empty and populated collections, with the available set in `fix`. Projection requires a machine format.
+One event object per line: `item`, `warning`, `progress`, `summary`, `confirmation_required`, `error`. Zero or more nonterminal `progress` events (`{phase, message, completed?, total?}`) may precede the terminal; every stream ends with exactly one terminal event (`summary`, `confirmation_required`, or `error`). Collections stream items individually; `--fields id,title` projects item fields against the command's static field inventory — unknown fields fail identically on empty and populated collections, with the available set in `fix`. Projection requires a machine format.
 
 ## Mutation flow
 

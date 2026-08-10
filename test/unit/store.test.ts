@@ -5,6 +5,8 @@ import { NodeServices } from "@effect/platform-node"
 import { Effect, Layer } from "effect"
 import { afterEach, beforeEach, describe, expect, it } from "vitest"
 import { Task } from "../../src/domain/task.ts"
+import type { OutputMode } from "../../src/output/format.ts"
+import { Renderer } from "../../src/output/renderer.ts"
 import { appServicesLayer } from "../../src/services/index.ts"
 import { StoreReader, StoreWriter } from "../../src/services/store.ts"
 
@@ -28,7 +30,19 @@ afterEach(async () => {
   await rm(dir, { recursive: true, force: true })
 })
 
-const layer = appServicesLayer.pipe(Layer.provideMerge(NodeServices.layer))
+const mode: OutputMode = {
+  format: "json",
+  noInput: true,
+  color: false,
+  argv: [],
+  helpRequested: false,
+  explicitFormat: true,
+}
+
+const layer = appServicesLayer.pipe(
+  Layer.provideMerge(Renderer.layer(mode, "lasso")),
+  Layer.provideMerge(NodeServices.layer),
+)
 
 const load = Effect.gen(function* () {
   const reader = yield* StoreReader

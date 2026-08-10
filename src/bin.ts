@@ -110,7 +110,11 @@ const main = async (): Promise<number> => {
   }
 
   const root = buildRoot(CLI_NAME, CLI_SUMMARY, contracts)
-  const baseLayer = Layer.mergeAll(appServicesLayer, Renderer.layer(mode, CLI_NAME))
+  const rendererLayer = Renderer.layer(mode, CLI_NAME)
+  const baseLayer = Layer.mergeAll(
+    appServicesLayer.pipe(Layer.provideMerge(rendererLayer)),
+    rendererLayer,
+  )
   const appLayer = (
     mode.format === "text" ? baseLayer : Layer.mergeAll(baseLayer, machineOutputLayer(mode.format))
   ).pipe(Layer.provideMerge(NodeServices.layer))

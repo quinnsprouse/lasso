@@ -182,6 +182,7 @@ describe("describe document", () => {
     expect(document.protocol.exitCodes.confirmationRequired).toBe(4)
     expect(document.protocol.errorCatalog.length).toBe(Object.keys(ERROR_CATALOG).length)
     expect(document.protocol.ndjsonEvents).toContain("confirmation_required")
+    expect(document.protocol.ndjsonEvents).toContain("progress")
   })
 
   it("describes the framework params for mutations and collections", () => {

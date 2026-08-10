@@ -120,7 +120,7 @@ export const describeCli = (options: {
         warnings: ["…"],
       },
     },
-    ndjsonEvents: ["item", "warning", "summary", "confirmation_required", "error"],
+    ndjsonEvents: ["item", "warning", "progress", "summary", "confirmation_required", "error"],
     exitCodes: ExitCode,
     errorCatalog: errorCatalogTable(),
   },

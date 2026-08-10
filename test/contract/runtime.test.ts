@@ -13,6 +13,7 @@ import { defineMutation, defineQuery } from "../../src/contract/contract.ts"
 import type { OutputMode } from "../../src/output/format.ts"
 import { Renderer } from "../../src/output/renderer.ts"
 import { settleExit } from "../../src/runtime.ts"
+import { Progress } from "../../src/output/progress.ts"
 import { StoreReader, StoreWriter } from "../../src/services/store.ts"
 import { Task } from "../../src/domain/task.ts"
 import { taskCreate } from "../../src/commands/task-create.ts"
@@ -135,7 +136,24 @@ const argsQuery = defineQuery({
   handler: (input) => Effect.succeed(input),
 })
 
-const contracts = [counterMutation, failingQuery, listQuery, argsQuery, taskCreate]
+const progressQuery = defineQuery({
+  name: "counter slow",
+  summary: "Test query that reports progress",
+  stability: "experimental",
+  params: {},
+  dataSchema: Schema.Struct({ done: Schema.Boolean }),
+  domainErrorCodes: [],
+  examples: [{ command: "lasso counter slow --json", description: "slow" }],
+  handler: () =>
+    Effect.gen(function* () {
+      const progress = yield* Progress
+      yield* progress.report({ phase: "warm-up", message: "starting" })
+      yield* progress.report({ phase: "main", message: "working", completed: 2, total: 4 })
+      return { done: true }
+    }),
+})
+
+const contracts = [counterMutation, failingQuery, listQuery, argsQuery, taskCreate, progressQuery]
 
 const seedTask = new Task({
   id: "task_seed",
@@ -194,9 +212,12 @@ const invoke = async (
   )
 
   const root = buildRoot("lasso", "test cli", contracts)
-  const layer = Layer.mergeAll(fakeServices, Renderer.layer(mode, "lasso")).pipe(
-    Layer.provideMerge(environment),
-  )
+  const rendererLayer = Renderer.layer(mode, "lasso")
+  const layer = Layer.mergeAll(
+    fakeServices,
+    rendererLayer,
+    Progress.layer.pipe(Layer.provideMerge(rendererLayer)),
+  ).pipe(Layer.provideMerge(environment))
   const exit: Exit.Exit<void, unknown> = await Effect.runPromiseExit(
     runRoot(root, "0.0.0", argv).pipe(Effect.provide(layer)),
   )
@@ -443,5 +464,35 @@ describe("confirmation edge cases", () => {
     expect(result.code).toBe(4)
     const confirmArgs = lines(result.stdout)[0]!.confirmation.confirmArgs as Array<string>
     expect(confirmArgs.indexOf("--confirm")).toBeLessThan(confirmArgs.indexOf("--"))
+  })
+})
+
+describe("progress events", () => {
+  it("ndjson: nonterminal progress events precede exactly one terminal", async () => {
+    const result = await invoke(["counter", "slow"], "ndjson")
+    expect(result.code).toBe(0)
+    const events = lines(result.stdout, "ndjson")
+    expect(events.map((event) => event["event"])).toEqual(["progress", "progress", "summary"])
+    expect(events[1]).toEqual({
+      event: "progress",
+      phase: "main",
+      message: "working",
+      completed: 2,
+      total: 4,
+    })
+  })
+
+  it("json: stdout stays exactly one envelope; progress goes to stderr", async () => {
+    const result = await invoke(["counter", "slow"], "json")
+    expect(result.code).toBe(0)
+    const envelopes = lines(result.stdout)
+    expect(envelopes.length).toBe(1)
+    expect(result.stderr).toContain("progress[main]: working (2/4)")
+  })
+
+  it("text: progress lines on stderr, data on stdout", async () => {
+    const result = await invoke(["counter", "slow"], "text")
+    expect(result.stderr).toContain("progress[warm-up]: starting")
+    expect(result.stdout).not.toContain("progress")
   })
 })
