@@ -93,7 +93,7 @@ step("introspection works with no auth, network, config, or state", () => {
     throw new Error("describe payload incomplete")
   }
   const schema = JSON.parse(runBin(["schema", "--json"]))
-  if (!String(schema.data.$schema).includes("2020-12")) {
+  if (!String(schema.data.dialect).includes("2020-12")) {
     throw new Error("schema is not draft 2020-12")
   }
 })
