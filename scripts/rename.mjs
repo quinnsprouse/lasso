@@ -3,6 +3,7 @@
 // Rewrites every tracked reference — package identity, bin launcher, CLI
 // metadata, env-var prefix, state directory, examples, docs, and tests — so
 // the full verification suite stays green after the rename.
+import { execFileSync } from "node:child_process"
 import { readdirSync, readFileSync, renameSync, statSync, writeFileSync } from "node:fs"
 import { join } from "node:path"
 
@@ -52,6 +53,9 @@ for (const file of files) {
 }
 
 renameSync(`bin/${oldName}.cjs`, `bin/${name}.cjs`)
+
+// The new name changes line lengths; re-format so the Fast profile stays green.
+execFileSync("npx", ["biome", "format", "--write", "."], { stdio: "ignore" })
 
 process.stderr.write(`renamed ${oldName} → ${name} across ${changed} files\n`)
 process.stderr.write("next: npm run check, then update package.json repository if it changed\n")
