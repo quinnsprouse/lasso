@@ -2,7 +2,7 @@
 
 An agent-first CLI starter kit. The machine surface — JSON envelopes, semantic exit codes, a structured confirmation protocol, runtime introspection — is the default; the human TTY experience is the fallback. Built whole-app on [Effect](https://effect.website) v4 with a contract layer that makes protocol violations fail the build, not the user.
 
-Requires Node 22.18+ (24 LTS recommended), npm 10+, and Git.
+Requires Node 22.18+ (24 LTS recommended), npm 10+, and Git. Developed and CI-tested on Linux and macOS; Windows is untested.
 
 ## Quick start
 
@@ -46,16 +46,15 @@ npm run build           # bundle dist/bin.cjs (self-contained, zero runtime deps
 Commands are contracts; the parser, help, `describe`, JSON Schema, and docs are generated from them. See `docs/agents/COMMANDS.md` for the full reference:
 
 ```ts
-export const taskList = register(
-  defineQuery({
-    name: "task list",
-    summary: "List tasks",
-    params: { status: { kind: "flag", type: "choice", choices: ["open", "done", "all"], default: "open", description: "Filter tasks by status" } },
-    output: TaskList,
-    handler: (input) => Effect.gen(function* () { /* services in, data out */ }),
-    // …
-  }),
-)
+export const taskList = defineQuery({
+  name: "task list",
+  summary: "List tasks",
+  params: { status: { kind: "flag", type: "choice", choices: ["open", "done", "all"], default: "open", description: "Filter tasks by status" } },
+  dataSchema: TaskList,
+  handler: Effect.fn("taskList.handler")(function* (input) { /* services in, data out */ }),
+  // …
+})
+// …then add it to the roster in src/commands/index.ts (or use the generator).
 ```
 
 ## Verification

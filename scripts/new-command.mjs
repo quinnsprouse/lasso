@@ -18,13 +18,63 @@ if (!parts.every((part) => /^[a-z][a-z0-9-]*$/.test(part))) {
   process.exit(64)
 }
 
+const RESERVED = new Set([
+  "class",
+  "const",
+  "delete",
+  "do",
+  "else",
+  "enum",
+  "export",
+  "extends",
+  "false",
+  "for",
+  "function",
+  "if",
+  "import",
+  "in",
+  "new",
+  "null",
+  "return",
+  "super",
+  "switch",
+  "this",
+  "throw",
+  "true",
+  "try",
+  "typeof",
+  "var",
+  "void",
+  "while",
+  "with",
+])
+
 const commandName = parts.join(" ")
 const fileBase = parts.join("-")
 const exportName = fileBase.replace(/-([a-z0-9])/g, (_, c) => c.toUpperCase())
 const file = join("src", "commands", `${fileBase}.ts`)
 
+if (RESERVED.has(exportName)) {
+  process.stderr.write(`"${exportName}" is a reserved word — pick another name\n`)
+  process.exit(64)
+}
 if (existsSync(file)) {
   process.stderr.write(`${file} already exists\n`)
+  process.exit(73)
+}
+
+const binName = Object.keys(JSON.parse(readFileSync("package.json", "utf8")).bin)[0]
+
+const indexFile = join("src", "commands", "index.ts")
+const index = readFileSync(indexFile, "utf8")
+for (const marker of ["// generator:imports", "  // generator:contracts"]) {
+  if (!index.includes(marker)) {
+    process.stderr.write(`marker "${marker.trim()}" missing from ${indexFile} — cannot register\n`)
+    process.exit(78)
+  }
+}
+if (index.includes(`{ ${exportName} }`) || new RegExp(`\\b${exportName},`).test(index)) {
+  process.stderr.write(`"${exportName}" is already registered in ${indexFile}\n`)
   process.exit(73)
 }
 
@@ -42,7 +92,7 @@ export const ${exportName} = defineQuery({
   domainErrorCodes: [],
   examples: [
     {
-      command: "lasso ${commandName} --json",
+      command: "${binName} ${commandName} --json",
       description: "Run ${commandName} and print the JSON envelope",
     },
   ],
@@ -52,8 +102,6 @@ export const ${exportName} = defineQuery({
 `,
 )
 
-const indexFile = join("src", "commands", "index.ts")
-const index = readFileSync(indexFile, "utf8")
 const updated = index
   .replace(
     "// generator:imports",

@@ -1,4 +1,4 @@
-import { Console, Effect, Layer, Option, Schema } from "effect"
+import { Console, Effect, Layer, Schema } from "effect"
 import { Argument, CliError, CliOutput, Command, Flag } from "effect/unstable/cli"
 import type { AppError } from "../errors.ts"
 import { Errors } from "../errors.ts"
@@ -68,10 +68,18 @@ const flagFor = (param: SurfaceParam): Flag.Flag<unknown> => {
     const described = flag.pipe(Flag.withDescription(param.description))
     return param.alias === undefined ? described : described.pipe(Flag.withAlias(param.alias))
   }
+  // atMost(1) makes a repeated scalar flag a parse error instead of a
+  // silent first-wins; the array result is unwrapped to the single value.
   const optionalized = <A>(flag: Flag.Flag<A>): Flag.Flag<A | undefined> =>
     param.default !== undefined
-      ? withMeta(flag).pipe(Flag.withDefault(param.default as A))
-      : withMeta(flag).pipe(Flag.optional, Flag.map(Option.getOrUndefined))
+      ? withMeta(flag).pipe(
+          Flag.atMost(1),
+          Flag.map((values) => values[0] ?? (param.default as A)),
+        )
+      : withMeta(flag).pipe(
+          Flag.atMost(1),
+          Flag.map((values) => values[0]),
+        )
 
   switch (param.type) {
     case "boolean":
@@ -180,6 +188,16 @@ const runQuery = (surface: CommandSurface, raw: Record<string, unknown>): Handle
     const data = yield* contract.handler(domain as InputOf<Record<string, ParamSpec>>)
     const encoded = yield* encodeOutput(contract, data)
     const rows = contract.collection?.items(encoded)
+    if (rows !== undefined) {
+      const inventory = new Set<string>(contract.collection?.fields ?? [])
+      const stray = rows.flatMap((row) => Object.keys(row)).find((key) => !inventory.has(key))
+      if (stray !== undefined) {
+        return yield* Errors.invalidData({
+          message: `collection row field "${stray}" is not in the declared fields inventory`,
+          fix: `add "${stray}" to the collection.fields of "${surface.name}"`,
+        })
+      }
+    }
 
     if (controls.fields !== undefined && rows !== undefined) {
       const projected = yield* project(surface, rows, controls.fields)
@@ -229,7 +247,18 @@ const runMutation = (surface: CommandSurface, raw: Record<string, unknown>): Han
       })
     }
 
-    const plan = yield* contract.plan(domain as InputOf<Record<string, ParamSpec>>)
+    const planEffect = contract.plan(domain as InputOf<Record<string, ParamSpec>>)
+    const plan = yield* controls.confirm === undefined
+      ? planEffect
+      : planEffect.pipe(
+          Effect.catch((cause) =>
+            Errors.staleConfirmation({
+              message: `the previewed plan can no longer be produced: ${cause.message}`,
+              fix: "re-run without --confirm to get a fresh plan",
+              details: { code: cause.code },
+            }),
+          ),
+        )
     const encodedPlan = yield* Schema.encodeUnknownEffect(contract.planSchema)(plan).pipe(
       Effect.mapError((cause) =>
         Errors.invalidData({ message: `plan failed its declared schema: ${cause.message}` }),
@@ -265,9 +294,16 @@ const runMutation = (surface: CommandSurface, raw: Record<string, unknown>): Han
       }
     } else if (!controls.yes) {
       // The canonical continuation pins the machine format explicitly so a
-      // replay under a TTY still produces machine output.
+      // replay under a TTY still produces machine output. Controls are
+      // inserted BEFORE any -- terminator so the replay parses verbatim.
       const formatArgs = renderer.mode.format === "ndjson" ? ["--format", "ndjson"] : ["--json"]
-      const confirmArgs = [...renderer.mode.argv, "--confirm", token, ...formatArgs]
+      const controlArgs = ["--confirm", token, ...formatArgs]
+      const original = renderer.mode.argv
+      const terminator = original.indexOf("--")
+      const confirmArgs =
+        terminator === -1
+          ? [...original, ...controlArgs]
+          : [...original.slice(0, terminator), ...controlArgs, ...original.slice(terminator)]
       yield* renderer
         .emit({
           kind: "confirmation",
@@ -356,20 +392,6 @@ export const runRoot = (
  */
 const machineFormatterBase = CliOutput.defaultFormatter({ colors: false })
 
-const machineFormatter: CliOutput.Formatter = {
-  formatCliError: (error) => machineFormatterBase.formatCliError(error),
-  formatError: (error) => machineFormatterBase.formatError(error),
-  formatErrors: (errors) => machineFormatterBase.formatErrors(errors),
-  formatHelpDoc: () => "",
-  formatVersion: (name, cliVersion) =>
-    JSON.stringify({
-      schemaVersion: SCHEMA_VERSION,
-      status: "ok",
-      data: { name, version: cliVersion },
-      warnings: [],
-    }),
-}
-
 const quietConsole: Console.Console = Object.assign(Object.create(globalThis.console), {
   log: (...args: ReadonlyArray<unknown>) => {
     if (args.every((arg) => typeof arg === "string" && arg.trim() === "")) {
@@ -379,10 +401,25 @@ const quietConsole: Console.Console = Object.assign(Object.create(globalThis.con
   },
 })
 
-export const machineOutputLayer: Layer.Layer<never> = Layer.mergeAll(
-  CliOutput.layer(machineFormatter),
-  Layer.succeed(Console.Console, quietConsole),
-)
+export const machineOutputLayer = (format: "json" | "ndjson"): Layer.Layer<never> => {
+  const formatter: CliOutput.Formatter = {
+    formatCliError: (error) => machineFormatterBase.formatCliError(error),
+    formatError: (error) => machineFormatterBase.formatError(error),
+    formatErrors: (errors) => machineFormatterBase.formatErrors(errors),
+    formatHelpDoc: () => "",
+    // --version follows the outcome protocol of the negotiated format.
+    formatVersion: (name, cliVersion) =>
+      format === "ndjson"
+        ? JSON.stringify({ event: "summary", data: { name, version: cliVersion } })
+        : JSON.stringify({
+            schemaVersion: SCHEMA_VERSION,
+            status: "ok",
+            data: { name, version: cliVersion },
+            warnings: [],
+          }),
+  }
+  return Layer.mergeAll(CliOutput.layer(formatter), Layer.succeed(Console.Console, quietConsole))
+}
 
 /** Kit-owned classification of a failed run — bin.ts never sees parser types. */
 export type RunFailure =
@@ -408,16 +445,29 @@ const usageErrorFrom = (error: CliError.CliError, binName: string): AppErrorLike
         fix: `run ${binName} describe --json to list valid flags`,
       }
     case "DuplicateOption":
-      return { message: `flag "${error.option}" was given more than once` }
+      return {
+        message: `flag "${error.option}" was given more than once`,
+        fix: `pass "${error.option}" a single time`,
+      }
     case "MissingOption":
-      return { message: `missing required flag "${error.option}"` }
+      return {
+        message: `missing required flag "${error.option}"`,
+        fix: `add "${error.option}"; run ${binName} describe --json for its type`,
+      }
     case "MissingArgument":
-      return { message: `missing required argument "${error.argument}"` }
+      return {
+        message: `missing required argument "${error.argument}"`,
+        fix: `provide "${error.argument}"; run ${binName} describe --json for its type`,
+      }
     case "UnexpectedArgument":
-      return { message: `unexpected argument(s): ${error.arguments.join(" ")}` }
+      return {
+        message: `unexpected argument(s): ${error.arguments.join(" ")}`,
+        fix: `remove them; run ${binName} describe --json to see accepted arguments`,
+      }
     case "InvalidValue":
       return {
         message: `invalid value "${error.value}" for "${error.option}" — expected ${error.expected}`,
+        fix: `pass a ${error.expected} value for "${error.option}"`,
       }
     case "UnknownSubcommand":
       return {

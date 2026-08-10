@@ -88,7 +88,16 @@ export const describeCli = (options: {
         cliName: "--no-input",
         description: "Never wait for input (this CLI never prompts; accepted for compatibility)",
       },
+      { cliName: "--help", description: "In machine formats, answers with this describe payload" },
+      { cliName: "--version", description: "CLI version (envelope or summary event)" },
+      { cliName: "--log-level", description: "Runtime log level (diagnostics go to stderr)" },
+      { cliName: "--wizard", description: "Interactive wizard — text mode on a terminal only" },
+      {
+        cliName: "--completions",
+        description: "Print a shell completion script — text mode only",
+      },
     ],
+    flagSpellings: "Boolean flags also accept a --no-<name> negated form.",
     envelope: {
       ok: { schemaVersion: "string", status: "ok", data: "…", warnings: ["…"] },
       error: {
@@ -133,6 +142,28 @@ export const commandSchemas = (contract: AnyContract) => {
     },
     output: standaloneSchema(contract.dataSchema.ast),
     ...(contract.kind === "mutation" ? { plan: standaloneSchema(contract.planSchema.ast) } : {}),
+    ...(contract.kind === "query" && contract.collection !== undefined
+      ? {
+          // The shape of --fields output: items constrained to the declared
+          // inventory (any subset), plus the count.
+          projected: {
+            $schema: DIALECT,
+            type: "object",
+            properties: {
+              items: {
+                type: "array",
+                items: {
+                  type: "object",
+                  propertyNames: { enum: [...contract.collection.fields] },
+                },
+              },
+              count: { type: "integer" },
+            },
+            required: ["items", "count"],
+            additionalProperties: false,
+          },
+        }
+      : {}),
   }
 }
 

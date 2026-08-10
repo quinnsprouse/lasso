@@ -131,8 +131,9 @@ describe("mutation protocol", () => {
     expect(envelope.status).toBe("confirmation_required")
     expect(envelope.plan.action).toBe("create_task")
 
+    // Replayed VERBATIM: confirmArgs is the complete canonical continuation.
     const confirmArgs = envelope.confirmation.confirmArgs as string[]
-    const second = await run([...confirmArgs, "--json"])
+    const second = await run(confirmArgs)
     expect(second.exitCode).toBe(0)
     expect(parse(second.stdout).data.created).toBe(true)
 
@@ -146,7 +147,7 @@ describe("mutation protocol", () => {
       "create",
       "Something",
       "--confirm",
-      "plan_000000000000",
+      "plan_0000000000000000",
       "--json",
     ])
     expect(result.exitCode).toBe(64)
@@ -183,5 +184,43 @@ describe("mutation protocol", () => {
     const result = await run(["task", "create", "Idem", "--yes", "--if-not-exists", "--json"])
     expect(result.exitCode).toBe(0)
     expect(parse(result.stdout).data.created).toBe(false)
+  })
+})
+
+describe("machine-mode built-ins", () => {
+  it("refuses the wizard and completions in machine formats", async () => {
+    const wizard = await run(["task", "create", "--wizard", "--json"])
+    expect(wizard.exitCode).toBe(64)
+    expect(parse(wizard.stdout).error.code).toBe("invalid_usage")
+
+    const completions = await run(["--completions", "sh", "--json"])
+    expect(completions.exitCode).toBe(64)
+    expect(parse(completions.stdout).error.code).toBe("invalid_usage")
+  })
+
+  it("--version in ndjson mode is a summary event", async () => {
+    const result = await run(["--version", "--format", "ndjson"])
+    expect(result.exitCode).toBe(0)
+    expect(JSON.parse(result.stdout.trim()).event).toBe("summary")
+  })
+
+  it("--help on an unknown command is a usage error, not describe data", async () => {
+    const result = await run(["nonsense", "--help", "--json"])
+    expect(result.exitCode).toBe(64)
+    expect(parse(result.stdout).error.code).toBe("invalid_usage")
+  })
+
+  it("confirmArgs replays verbatim even with a -- terminator", async () => {
+    const first = await run(["task", "create", "--json", "--", "--weird-title"])
+    expect(first.exitCode).toBe(4)
+    const confirmArgs = parse(first.stdout).confirmation.confirmArgs as string[]
+    const second = await run(confirmArgs)
+    expect(second.exitCode).toBe(0)
+    expect(parse(second.stdout).data.task.title).toBe("--weird-title")
+  })
+
+  it("repeated scalar flags are a usage error, not first-wins", async () => {
+    const result = await run(["task", "list", "--status", "done", "--status", "open", "--json"])
+    expect(result.exitCode).toBe(64)
   })
 })

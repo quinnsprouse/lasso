@@ -19,7 +19,7 @@ describe("plan tokens", () => {
     fcAssert(
       property(jsonValue(), (value) => {
         const token = planToken(value)
-        expect(token).toMatch(/^plan_[0-9a-f]{12}$/)
+        expect(token).toMatch(/^plan_[0-9a-f]{16}$/)
       }),
     )
   })

@@ -9,7 +9,12 @@
   "rules": {
     "no-console": "error",
     "typescript/consistent-return": "off",
-    "eslint/no-underscore-dangle": ["error", { "allow": ["_tag"] }],
+    "eslint/no-underscore-dangle": [
+      "error",
+      {
+        "allow": ["_tag"]
+      }
+    ],
     "no-restricted-imports": [
       "error",
       {
@@ -25,21 +30,46 @@
           {
             "name": "node:process",
             "message": "Only src/bin.ts touches the process; commands get services."
-          }
-        ],
-        "patterns": [
+          },
           {
-            "group": ["effect/unstable/cli"],
-            "importNamePattern": "^(Command|Flag|Argument|Prompt)$",
-            "message": "Only src/contract/adapter.ts and src/bin.ts may import the parser — commands are defined as contracts."
+            "name": "effect/unstable/cli",
+            "message": "Only src/contract/adapter.ts may import the parser \u2014 commands are defined as contracts."
           }
         ]
+      }
+    ],
+    "no-restricted-globals": [
+      "error",
+      {
+        "name": "process",
+        "message": "Only src/bin.ts touches the process; commands get services."
       }
     ]
   },
   "overrides": [
     {
-      "files": ["src/bin.ts", "src/contract/adapter.ts"],
+      "files": ["src/bin.ts"],
+      "rules": {
+        "no-restricted-globals": "off",
+        "no-restricted-imports": [
+          "error",
+          {
+            "paths": [
+              {
+                "name": "node:fs",
+                "message": "Use the FileSystem service so tests can swap the layer."
+              },
+              {
+                "name": "effect/unstable/cli",
+                "message": "bin.ts consumes kit-owned adapter types only."
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "files": ["src/contract/adapter.ts"],
       "rules": {
         "no-restricted-imports": [
           "error",
@@ -48,10 +78,15 @@
               {
                 "name": "node:fs",
                 "message": "Use the FileSystem service so tests can swap the layer."
+              },
+              {
+                "name": "node:process",
+                "message": "Only src/bin.ts touches the process."
               }
             ]
           }
-        ]
+        ],
+        "no-restricted-globals": "off"
       }
     },
     {
@@ -71,7 +106,8 @@
       "rules": {
         "no-console": "off",
         "no-restricted-imports": "off",
-        "typescript/no-unsafe-type-assertion": "off"
+        "typescript/no-unsafe-type-assertion": "off",
+        "no-restricted-globals": "off"
       }
     }
   ],

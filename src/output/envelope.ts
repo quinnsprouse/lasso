@@ -1,4 +1,5 @@
 import { Schema } from "effect"
+import { ERROR_CATALOG } from "../errors.ts"
 
 /**
  * The output protocol version. Bump only with a new envelope shape, and keep
@@ -7,7 +8,7 @@ import { Schema } from "effect"
 export const SCHEMA_VERSION = "1"
 
 const ErrorBody = Schema.Struct({
-  code: Schema.String,
+  code: Schema.Literals(Object.keys(ERROR_CATALOG)),
   message: Schema.String,
   fix: Schema.optional(Schema.String),
   transient: Schema.Boolean,
@@ -15,21 +16,21 @@ const ErrorBody = Schema.Struct({
 })
 
 export const OkEnvelope = Schema.Struct({
-  schemaVersion: Schema.String,
+  schemaVersion: Schema.Literal(SCHEMA_VERSION),
   status: Schema.Literal("ok"),
   data: Schema.Unknown,
   warnings: Schema.Array(Schema.String),
 })
 
 export const ErrorEnvelope = Schema.Struct({
-  schemaVersion: Schema.String,
+  schemaVersion: Schema.Literal(SCHEMA_VERSION),
   status: Schema.Literal("error"),
   error: ErrorBody,
   warnings: Schema.Array(Schema.String),
 })
 
 export const ConfirmationEnvelope = Schema.Struct({
-  schemaVersion: Schema.String,
+  schemaVersion: Schema.Literal(SCHEMA_VERSION),
   status: Schema.Literal("confirmation_required"),
   plan: Schema.Unknown,
   confirmation: Schema.Struct({

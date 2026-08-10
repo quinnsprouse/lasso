@@ -1,9 +1,10 @@
 #!/usr/bin/env node
 // Rename the starter into your CLI. Usage: node scripts/rename.mjs <new-name>
-// Rewrites the package name, bin entry, launcher, CLI identity, and env-var
-// prefix, then renames the launcher file. Grep for the old name afterwards if
-// you also want docs and examples updated (they reference the bin name).
-import { readFileSync, renameSync, writeFileSync } from "node:fs"
+// Rewrites every tracked reference — package identity, bin launcher, CLI
+// metadata, env-var prefix, state directory, examples, docs, and tests — so
+// the full verification suite stays green after the rename.
+import { readdirSync, readFileSync, renameSync, statSync, writeFileSync } from "node:fs"
+import { join } from "node:path"
 
 const name = process.argv[2]
 if (name === undefined || !/^[a-z][a-z0-9-]*$/.test(name)) {
@@ -11,31 +12,46 @@ if (name === undefined || !/^[a-z][a-z0-9-]*$/.test(name)) {
   process.exit(64)
 }
 
-const envPrefix = name.replace(/-/g, "_").toUpperCase()
-
 const pkg = JSON.parse(readFileSync("package.json", "utf8"))
-const oldName = pkg.name
-pkg.name = name
-pkg.bin = { [name]: `./bin/${name}.cjs` }
-writeFileSync("package.json", `${JSON.stringify(pkg, null, 2)}\n`)
+const oldName = Object.keys(pkg.bin)[0]
+if (oldName === name) {
+  process.stderr.write(`already named ${name}\n`)
+  process.exit(0)
+}
+const oldPrefix = oldName.replace(/-/g, "_").toUpperCase()
+const newPrefix = name.replace(/-/g, "_").toUpperCase()
 
-const launcher = readFileSync("bin/lasso.cjs", "utf8")
-writeFileSync("bin/lasso.cjs", launcher)
-renameSync("bin/lasso.cjs", `bin/${name}.cjs`)
+const SKIP_DIRS = new Set(["node_modules", "dist", "coverage", ".git", `.${oldName}`, ".lasso"])
+const TEXT_EXT = /\.(ts|mjs|cjs|json|md|yml|yaml)$/
 
-const meta = readFileSync("src/meta.ts", "utf8")
-writeFileSync("src/meta.ts", meta.replace(`CLI_NAME = "${oldName}"`, `CLI_NAME = "${name}"`))
+const files = []
+const walk = (dir) => {
+  for (const entry of readdirSync(dir)) {
+    const path = join(dir, entry)
+    if (statSync(path).isDirectory()) {
+      if (!SKIP_DIRS.has(entry)) {
+        walk(path)
+      }
+    } else if (TEXT_EXT.test(entry) || entry === "LICENSE") {
+      files.push(path)
+    }
+  }
+}
+walk(".")
 
-const format = readFileSync("src/output/format.ts", "utf8")
-writeFileSync("src/output/format.ts", format.replaceAll("LASSO_FORMAT", `${envPrefix}_FORMAT`))
+let changed = 0
+for (const file of files) {
+  const before = readFileSync(file, "utf8")
+  const after = before
+    .replaceAll(new RegExp(`\\b${oldName}\\b`, "g"), name)
+    .replaceAll(new RegExp(`\\b${oldPrefix}_`, "g"), `${newPrefix}_`)
+  if (after !== before) {
+    writeFileSync(file, after)
+    changed += 1
+  }
+}
 
-const smoke = readFileSync("scripts/pack-smoke.mjs", "utf8")
-writeFileSync(
-  "scripts/pack-smoke.mjs",
-  smoke
-    .replaceAll(`"${oldName}"`, `"${name}"`)
-    .replaceAll(`".bin", "${oldName}"`, `".bin", "${name}"`),
-)
+renameSync(`bin/${oldName}.cjs`, `bin/${name}.cjs`)
 
-process.stderr.write(`renamed ${oldName} → ${name}\n`)
-process.stderr.write(`grep -ri ${oldName} to find remaining references in docs and tests\n`)
+process.stderr.write(`renamed ${oldName} → ${name} across ${changed} files\n`)
+process.stderr.write("next: npm run check, then update package.json repository if it changed\n")

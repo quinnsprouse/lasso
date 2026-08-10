@@ -127,7 +127,7 @@ step("confirmation protocol: exit 4, then confirmArgs completes the plan", () =>
   if (envelope.status !== "confirmation_required") {
     throw new Error("unconfirmed mutation must return confirmation_required")
   }
-  const second = JSON.parse(runBin([...envelope.confirmation.confirmArgs, "--json"]))
+  const second = JSON.parse(runBin(envelope.confirmation.confirmArgs))
   if (second.data.created !== true) {
     throw new Error("confirmArgs replay did not apply the plan")
   }
@@ -173,6 +173,22 @@ step("non-interactive safety: missing input fails fast, never hangs", () => {
 
 step("agent workflow: the command generator yields a green Fast profile", () => {
   sh("node scripts/new-command.mjs task ping")
+  sh("npm run check")
+})
+
+step("rename journey: the renamed template stays green", () => {
+  sh("node scripts/rename.mjs acme-cli")
+  sh("npm run check")
+  const renamedDescribe = JSON.parse(
+    execFileSync("node", ["--experimental-strip-types", "src/bin.ts", "describe", "--json"], {
+      cwd: work,
+      encoding: "utf8",
+    }),
+  )
+  if (renamedDescribe.data.cli.name !== "acme-cli") {
+    throw new Error("describe still reports the old CLI name after rename")
+  }
+  sh("node scripts/rename.mjs lasso")
   sh("npm run check")
 })
 

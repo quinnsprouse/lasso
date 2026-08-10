@@ -49,7 +49,13 @@ export const taskCreate = defineMutation({
     created: Schema.Boolean,
     task: Task,
   }),
-  domainErrorCodes: ["resource_conflict", "invalid_data", "cannot_write", "invalid_config"],
+  domainErrorCodes: [
+    "resource_conflict",
+    "invalid_data",
+    "cannot_write",
+    "invalid_config",
+    "transient_failure",
+  ],
   examples: [
     {
       command: 'lasso task create "Ship the kit" --yes --json',
@@ -81,6 +87,10 @@ export const taskCreate = defineMutation({
         fix: "re-run with --if-not-exists to make this a no-op",
       })
     }
+    // Plans must be DETERMINISTIC for identical state and input — replaying
+    // confirmArgs recomputes the plan and compares tokens. Apply-assigned
+    // metadata (like createdAt) therefore stays out of the plan: the token
+    // binds intent, not server-generated timestamps.
     return {
       action: "create_task" as const,
       task: { id, title, status: "open" as const },

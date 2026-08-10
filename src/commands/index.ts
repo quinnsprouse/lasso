@@ -1,18 +1,19 @@
 import type { MutationContract, QueryContract } from "../contract/contract.ts"
-import type { AppServices } from "../services/index.ts"
+import type { ApplyServices, PlanServices, QueryServices } from "../services/index.ts"
 import { makeIntrospection } from "./introspection.ts"
 import { taskCreate } from "./task-create.ts"
 import { taskList } from "./task-list.ts"
 // generator:imports — scripts/new-command.mjs inserts above this line
 
 /**
- * Contracts admitted to the roster may require only AppServices — a handler
- * that needs an unwired service fails to typecheck on this list, not at
- * runtime. Add services in src/services/index.ts.
+ * Contracts admitted to the roster are pinned to their capability sets:
+ * queries and plans read, applies write. A handler that needs an unwired
+ * service — or the wrong capability for its role — fails to typecheck on
+ * this list, not at runtime. Add services in src/services/index.ts.
  */
 export type RosterContract =
-  | QueryContract<any, any, AppServices>
-  | MutationContract<any, any, any, AppServices, AppServices>
+  | QueryContract<any, any, QueryServices>
+  | MutationContract<any, any, any, PlanServices, ApplyServices>
 
 const introspection = makeIntrospection(() => contracts)
 

@@ -21,7 +21,7 @@
     "check": "node scripts/verify.mjs fast",
     "check:push": "node scripts/verify.mjs push",
     "check:ci": "node scripts/verify.mjs ci",
-    "test": "vitest run",
+    "test": "vitest run test/unit test/contract",
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage",
     "test:contract": "node scripts/starter-contract.mjs",
@@ -31,7 +31,9 @@
     "typecheck": "tsc --noEmit",
     "effect:diagnostics": "effect-tsgo diagnostics --project tsconfig.json --strict",
     "knip": "knip",
-    "setup": "lefthook install"
+    "setup": "lefthook install",
+    "test:e2e": "vitest run test/e2e",
+    "prepack": "tsdown --logLevel silent"
   },
   "devDependencies": {
     "@biomejs/biome": "2.5.7",

@@ -3,14 +3,17 @@ import { Layer } from "effect"
 import { StoreReader, StoreWriter } from "./store.ts"
 
 /**
- * The canonical service set available to command handlers. Every contract's
- * requirement channel must stay within AppServices — the roster type in
- * src/commands/index.ts enforces it at compile time, so a handler that needs
- * an unwired service fails `tsc`, not the user.
+ * Capability sets by contract role. The roster type in src/commands/index.ts
+ * pins each handler to its set, so the compiler rejects a query or plan that
+ * asks for write capabilities and an apply that asks for read ones — see
+ * test/contract/type-fixtures.ts for the negative proofs.
  *
- * Adding a service: define it in this directory, add it to the union, and
- * merge its layer here.
+ * Adding a service: define it in this directory, add it to the right unions,
+ * and merge its layer into appServicesLayer.
  */
+export type QueryServices = StoreReader
+export type PlanServices = StoreReader
+export type ApplyServices = StoreWriter
 export type AppServices = StoreReader | StoreWriter
 
 export const appServicesLayer: Layer.Layer<AppServices, never, FileSystem.FileSystem | Path.Path> =

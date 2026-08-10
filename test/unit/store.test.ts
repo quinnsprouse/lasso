@@ -35,7 +35,7 @@ const load = Effect.gen(function* () {
   return yield* reader.load
 }).pipe(Effect.provide(layer))
 
-const modify = (transform: (tasks: ReadonlyArray<Task>) => ReadonlyArray<Task>) =>
+const modify = (transform: (tasks: ReadonlyArray<Task>) => ReadonlyArray<Task> | null) =>
   Effect.gen(function* () {
     const writer = yield* StoreWriter
     return yield* writer.modify(transform)
@@ -96,5 +96,41 @@ describe("store", () => {
     await Effect.runPromise(modify(() => [seed("task_after")]))
     const tasks = await Effect.runPromise(load)
     expect(tasks.map((task) => task.id)).toEqual(["task_after"])
+  })
+})
+
+describe("store concurrency and no-ops", () => {
+  it("a null transform performs no write: file identity is untouched", async () => {
+    await Effect.runPromise(modify(() => [seed("task_a")]))
+    const { stat } = await import("node:fs/promises")
+    const before = await stat(join(dir, ".lasso", "tasks.json"))
+
+    const result = await Effect.runPromise(modify(() => null))
+    expect(result.map((task) => task.id)).toEqual(["task_a"])
+
+    const after = await stat(join(dir, ".lasso", "tasks.json"))
+    expect(after.ino).toBe(before.ino)
+    expect(after.mtimeMs).toBe(before.mtimeMs)
+  })
+
+  it("contention on the advisory lock surfaces as transient_failure", async () => {
+    const { mkdir } = await import("node:fs/promises")
+    await mkdir(join(dir, ".lasso", "tasks.lock"), { recursive: true })
+    const error = await Effect.runPromise(modify(() => [seed("task_a")]).pipe(Effect.flip))
+    expect(error.code).toBe("transient_failure")
+    expect(error.transient).toBe(true)
+    expect(error.fix).toContain("tasks.lock")
+  })
+
+  it("an unwritable state directory fails immediately as cannot_write", async () => {
+    const { chmod, mkdir } = await import("node:fs/promises")
+    await mkdir(join(dir, ".lasso"), { recursive: true })
+    await chmod(join(dir, ".lasso"), 0o500)
+    const started = Date.now()
+    const error = await Effect.runPromise(modify(() => [seed("task_a")]).pipe(Effect.flip))
+    await chmod(join(dir, ".lasso"), 0o700)
+    expect(error.code).toBe("cannot_write")
+    // No pointless retry loop: permission failures are not contention.
+    expect(Date.now() - started).toBeLessThan(500)
   })
 })

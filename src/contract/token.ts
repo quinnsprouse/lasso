@@ -22,4 +22,4 @@ const sortValue = (value: unknown): unknown => {
 }
 
 export const planToken = (plan: unknown): string =>
-  `plan_${createHash("sha256").update(canonicalJson(plan)).digest("hex").slice(0, 12)}`
+  `plan_${createHash("sha256").update(canonicalJson(plan)).digest("hex").slice(0, 16)}`

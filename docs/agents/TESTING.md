@@ -4,11 +4,11 @@ Three suites, three purposes. All run in the profiles; none may be skipped to ge
 
 ## Unit (`test/unit/`) — logic through fake layers
 
-Handlers take services, so tests provide in-memory layers and run plan/apply as plain Effects — no filesystem, no CLI process. See `test/unit/task-create.test.ts` for the pattern (`Layer.succeed(Store, Store.of({ … }))`). Property-based tests (fast-check) guard parsing and token stability.
+Handlers take services, so tests provide in-memory layers and run plan/apply as plain Effects — no filesystem, no CLI process. See `test/unit/task-create.test.ts` for the pattern (`Layer.succeed(StoreReader, StoreReader.of({ … }))`). Property-based tests (fast-check) pin confirmation-token stability under arbitrary plan shapes; `test/unit/store.test.ts` runs the real filesystem store in a temp directory.
 
 ## Contract invariants (`test/contract/`) — mechanical protocol rejection
 
-`invariants.test.ts` runs every registered contract against the protocol rules (reserved params, error codes, examples, schema generation, roster/registry sync). When you add a command, these tests are the spec. Add new invariants here when a convention matters enough to enforce.
+`invariants.test.ts` runs every registered contract against the protocol rules (reserved CLI names, error codes, examples, standalone schema generation); `runtime.test.ts` drives the real parser + adapter + renderer in-process through test layers, proving the mutation state machine and every stream shape; `type-fixtures.ts` proves invalid params, unwired services, and capability-split violations fail `tsc`. When you add a command, these tests are the spec. Add new invariants here when a convention matters enough to enforce.
 
 ## E2E (`test/e2e/`) — the shipped artifact, black-box
 

@@ -24,7 +24,24 @@ jobs:
           cache: npm
           registry-url: https://registry.npmjs.org
       - run: npm ci
-      - run: npm run check:push
+      # The tag, package.json, package-lock, and the compiled CLI_VERSION must
+      # agree before anything is published.
+      - name: verify version agreement
+        run: |
+          node -e "
+            const pkg = require('./package.json');
+            const lock = require('./package-lock.json');
+            const meta = require('node:fs').readFileSync('src/meta.ts', 'utf8');
+            const cliVersion = meta.match(/CLI_VERSION = \"([^\"]+)\"/)[1];
+            const tag = process.env.TAG.replace(/^v/, '');
+            if (pkg.version !== tag || lock.version !== tag || cliVersion !== tag) {
+              console.error('version mismatch: tag=' + tag + ' package=' + pkg.version + ' lock=' + lock.version + ' CLI_VERSION=' + cliVersion);
+              process.exit(1);
+            }
+          "
+        env:
+          TAG: ${{ github.ref_name }}
+      - run: npm run check:ci
       # Attest BEFORE publishing: a failed attestation must never leave an
       # unattested package already public.
       - name: attest build artifact

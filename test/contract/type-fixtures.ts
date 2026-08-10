@@ -1,6 +1,7 @@
 import { Context, Effect, Schema } from "effect"
 import type { RosterContract } from "../../src/commands/index.ts"
 import { defineMutation, defineQuery } from "../../src/contract/contract.ts"
+import { StoreReader, StoreWriter } from "../../src/services/store.ts"
 
 /**
  * Compile-time fixtures: these assertions run under `tsc --noEmit` in the
@@ -109,6 +110,45 @@ const needsUnwired = defineQuery({
 type UnwiredIsRejected = typeof needsUnwired extends RosterContract ? true : false
 const rejected: UnwiredIsRejected = false
 
+// --- Capability split -----------------------------------------------------
+
+const queryWantsWrite = defineQuery({
+  name: "fixture query-writes",
+  summary: "queries may not require write capabilities",
+  stability: "experimental",
+  params: {},
+  dataSchema: Message,
+  domainErrorCodes: [],
+  examples: [{ command: "lasso x", description: "x" }],
+  handler: () =>
+    Effect.gen(function* () {
+      yield* StoreWriter
+      return { message: "wrote" }
+    }),
+})
+type QueryWriteIsRejected = typeof queryWantsWrite extends RosterContract ? true : false
+const queryWriteRejected: QueryWriteIsRejected = false
+
+const applyWantsRead = defineMutation({
+  name: "fixture apply-reads",
+  summary: "applies may not require read capabilities",
+  stability: "experimental",
+  params: {},
+  planSchema: Message,
+  dataSchema: Message,
+  idempotency: { kind: "none" },
+  domainErrorCodes: [],
+  examples: [{ command: "lasso x", description: "x" }],
+  plan: () => Effect.succeed({ message: "plan" }),
+  apply: () =>
+    Effect.gen(function* () {
+      yield* StoreReader
+      return { message: "read" }
+    }),
+})
+type ApplyReadIsRejected = typeof applyWantsRead extends RosterContract ? true : false
+const applyReadRejected: ApplyReadIsRejected = false
+
 // --- Mutations ------------------------------------------------------------
 
 defineMutation({
@@ -124,4 +164,4 @@ defineMutation({
   handler: () => Effect.succeed({ message: "ok" }),
 })
 
-export const fixtures = { rejected }
+export const fixtures = { rejected, queryWriteRejected, applyReadRejected }

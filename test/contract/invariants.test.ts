@@ -152,6 +152,13 @@ describe.each(surfaces.map((surface) => [surface.name, surface] as const))(
       if (contract.kind === "mutation") {
         expect(schemas).toHaveProperty("plan")
       }
+      if (contract.kind === "query" && contract.collection !== undefined) {
+        const projected = (schemas as Record<string, any>)["projected"]
+        expect(projected.$schema).toContain("2020-12")
+        expect(projected.properties.items.items.propertyNames.enum).toEqual([
+          ...contract.collection.fields,
+        ])
+      }
     })
   },
 )

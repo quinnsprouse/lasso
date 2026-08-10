@@ -20,13 +20,27 @@ export interface StoreReaderApi {
 }
 
 export interface StoreWriterApi {
+  /**
+   * Atomic read-transform-write. Returning `null` from the transform means
+   * "no change": nothing is written, the file keeps its identity, and the
+   * current state is returned — no-op mutations must not rewrite the store.
+   */
   readonly modify: (
-    transform: (tasks: ReadonlyArray<Task>) => ReadonlyArray<Task>,
+    transform: (tasks: ReadonlyArray<Task>) => ReadonlyArray<Task> | null,
   ) => Effect.Effect<ReadonlyArray<Task>, AppError>
 }
 
 const asCannotWrite = (what: string) => (cause: { message: string }) =>
   Errors.cannotWrite({ message: `cannot ${what}: ${cause.message}` })
+
+const isAlreadyExists = (error: unknown): boolean =>
+  typeof error === "object" &&
+  error !== null &&
+  "reason" in error &&
+  typeof error.reason === "object" &&
+  error.reason !== null &&
+  "_tag" in error.reason &&
+  error.reason._tag === "AlreadyExists"
 
 const DIR = ".lasso"
 const FILE = "tasks.json"
@@ -104,13 +118,21 @@ export class StoreWriter extends Context.Service<StoreWriter, StoreWriterApi>()(
           yield* fs
             .makeDirectory(DIR, { recursive: true })
             .pipe(Effect.mapError(asCannotWrite(`create ${DIR}`)))
+          // Only "already exists" means contention; any other failure (like
+          // an unwritable directory) is a real error and fails immediately.
           yield* fs.makeDirectory(lock).pipe(
-            Effect.retry({ schedule: Schedule.spaced("25 millis"), times: 40 }),
-            Effect.mapError(() =>
-              Errors.transient({
-                message: "the task store is locked by another process",
-                fix: `retry; if it persists, remove the stale ${lock} directory`,
-              }),
+            Effect.retry({
+              schedule: Schedule.spaced("25 millis"),
+              times: 40,
+              while: (error) => isAlreadyExists(error),
+            }),
+            Effect.mapError((error) =>
+              isAlreadyExists(error)
+                ? Errors.transient({
+                    message: "the task store is locked by another process",
+                    fix: `retry; if it persists, remove the stale ${lock} directory`,
+                  })
+                : Errors.cannotWrite({ message: `cannot create ${lock}: ${error.message}` }),
             ),
           )
         })
@@ -124,6 +146,9 @@ export class StoreWriter extends Context.Service<StoreWriter, StoreWriterApi>()(
               Effect.gen(function* () {
                 const current = yield* loadFrom(fs, file)
                 const next = transform(current)
+                if (next === null) {
+                  return current
+                }
                 const encoded = yield* Schema.encodeEffect(StoreFile)({ tasks: next }).pipe(
                   Effect.mapError((cause) =>
                     Errors.invalidData({ message: `tasks failed to encode: ${cause.message}` }),

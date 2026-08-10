@@ -7,8 +7,10 @@ export default defineConfig({
       provider: "v8",
       include: ["src/**"],
       exclude: ["src/bin.ts"],
-      // Set just below what the suite achieves so drops fail, and raise them
-      // as coverage grows — never lower them to make a change pass.
+      // Ratchet policy: these sit just below what the suite currently
+      // achieves. Raise them as coverage grows; recalibrate only when the
+      // suite's composition changes (e.g. moving tests between profiles),
+      // never to make a failing change pass.
       thresholds: {
         lines: 90,
         statements: 90,

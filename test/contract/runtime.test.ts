@@ -15,6 +15,7 @@ import { Renderer } from "../../src/output/renderer.ts"
 import { settleExit } from "../../src/runtime.ts"
 import { StoreReader, StoreWriter } from "../../src/services/store.ts"
 import { Task } from "../../src/domain/task.ts"
+import { taskCreate } from "../../src/commands/task-create.ts"
 
 /**
  * The outcome matrix: the ENTIRE runtime — parser, contract adapter,
@@ -134,7 +135,7 @@ const argsQuery = defineQuery({
   handler: (input) => Effect.succeed(input),
 })
 
-const contracts = [counterMutation, failingQuery, listQuery, argsQuery]
+const contracts = [counterMutation, failingQuery, listQuery, argsQuery, taskCreate]
 
 const seedTask = new Task({
   id: "task_seed",
@@ -161,7 +162,7 @@ const invoke = async (
     Layer.succeed(StoreReader, StoreReader.of({ load: Effect.succeed(tasks) })),
     Layer.succeed(
       StoreWriter,
-      StoreWriter.of({ modify: (transform) => Effect.sync(() => transform(tasks)) }),
+      StoreWriter.of({ modify: (transform) => Effect.sync(() => transform(tasks) ?? tasks) }),
     ),
   )
 
@@ -258,7 +259,7 @@ describe("mutation state machine", () => {
 
   it("a stale token never applies", async () => {
     reset()
-    const result = await invoke(["counter", "bump", "--confirm", "plan_000000000000"])
+    const result = await invoke(["counter", "bump", "--confirm", "plan_0000000000000000"])
     expect(result.code).toBe(64)
     expect(counters).toEqual({ plan: 1, apply: 0 })
     expect(lines(result.stdout)[0]!.error.code).toBe("stale_confirmation")
@@ -415,5 +416,25 @@ describe("parser failures settle through the kit-owned classification", () => {
     const envelope = lines(result.stdout)[0]!
     expect(envelope.data.count).toBe(2)
     expect(envelope.data.level).toBe("high")
+  })
+})
+
+describe("confirmation edge cases", () => {
+  it("a failing re-plan under --confirm maps to stale_confirmation", async () => {
+    // "Seed" derives id task_seed, which already exists in the fake store —
+    // plan fails with resource_conflict, which --confirm reports as staleness.
+    const result = await invoke(["task", "create", "Seed", "--confirm", "plan_0000000000000000"])
+    expect(result.code).toBe(64)
+    const envelope = lines(result.stdout)[0]!
+    expect(envelope.error.code).toBe("stale_confirmation")
+    expect(envelope.error.details).toEqual({ code: "resource_conflict" })
+  })
+
+  it("confirmArgs inserts controls before a -- terminator", async () => {
+    reset()
+    const result = await invoke(["counter", "bump", "--"])
+    expect(result.code).toBe(4)
+    const confirmArgs = lines(result.stdout)[0]!.confirmation.confirmArgs as Array<string>
+    expect(confirmArgs.indexOf("--confirm")).toBeLessThan(confirmArgs.indexOf("--"))
   })
 })

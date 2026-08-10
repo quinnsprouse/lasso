@@ -25,6 +25,9 @@ const writerWith = (initial: ReadonlyArray<Task>) => {
       modify: (transform) =>
         Effect.sync(() => {
           const next = transform(states.at(-1)!)
+          if (next === null) {
+            return states.at(-1)!
+          }
           states.push(next)
           return next
         }),
@@ -105,7 +108,10 @@ describe("task create apply", () => {
     const { layer } = writerWith([seed("task_x", "X")])
     const error = await Effect.runPromise(
       taskCreate
-        .apply({ action: "create_task", task: { id: "task_x", title: "X", status: "open" } })
+        .apply({
+          action: "create_task",
+          task: { id: "task_x", title: "X", status: "open" },
+        })
         .pipe(Effect.flip, Effect.provide(layer)),
     )
     expect(error.code).toBe("resource_conflict")

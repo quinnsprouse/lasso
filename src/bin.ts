@@ -1,5 +1,5 @@
 import { NodeServices } from "@effect/platform-node"
-import { Effect, Layer } from "effect"
+import { Effect, Fiber, Layer } from "effect"
 import type { Exit } from "effect"
 import { buildRoot, machineOutputLayer, runRoot } from "./contract/adapter.ts"
 import { describeCli } from "./contract/jsonschema.ts"
@@ -59,32 +59,71 @@ const main = async (): Promise<number> => {
     throw error
   }
 
-  // Explicit help in a machine format answers with `describe` data directly:
-  // agents should never have to parse help text. (Text-mode help is rendered
-  // by the parser runtime.)
+  // Interactive/raw built-ins never run in machine formats: the wizard is a
+  // prompt loop and completions emit a raw shell script — both would corrupt
+  // the envelope protocol. The wizard is also refused when input is closed.
+  const usage = (message: string, fix: string): number => {
+    render(mode, { kind: "failure", code: "invalid_usage", message, fix, transient: false })
+    return ExitCode.usage
+  }
+  const preTerminator = mode.argv.slice(
+    0,
+    mode.argv.includes("--") ? mode.argv.indexOf("--") : mode.argv.length,
+  )
+  if (preTerminator.includes("--wizard") && (mode.format !== "text" || mode.noInput)) {
+    return usage(
+      "--wizard is interactive and only available in text mode on a terminal",
+      "run without --wizard; use describe --json for machine-readable discovery",
+    )
+  }
+  if (preTerminator.includes("--completions") && mode.format !== "text") {
+    return usage(
+      "--completions emits a raw shell script and is only available in text mode",
+      "run without --json/--format to install completions",
+    )
+  }
+
+  // Explicit help in a machine format answers with `describe` data directly —
+  // but only when the named command exists; help must not mask an invalid
+  // command line. (Text-mode help is rendered by the parser runtime.)
   if (mode.format !== "text" && mode.helpRequested) {
-    render(mode, { kind: "ok", data: describeData() })
-    return ExitCode.success
+    const tokens = preTerminator.filter((arg) => arg !== "--help" && arg !== "-h")
+    const known = contracts.some(
+      (contract) =>
+        tokens.length === 0 ||
+        contract.name === tokens.join(" ") ||
+        contract.name.startsWith(`${tokens.join(" ")} `),
+    )
+    if (known) {
+      render(mode, { kind: "ok", data: describeData() })
+      return ExitCode.success
+    }
+    return usage(
+      `unknown command "${tokens.join(" ")}"`,
+      `run ${CLI_NAME} describe --json to list commands`,
+    )
   }
 
   const root = buildRoot(CLI_NAME, CLI_SUMMARY, contracts)
   const baseLayer = Layer.mergeAll(appServicesLayer, Renderer.layer(mode, CLI_NAME))
   const appLayer = (
-    mode.format === "text" ? baseLayer : Layer.mergeAll(baseLayer, machineOutputLayer)
+    mode.format === "text" ? baseLayer : Layer.mergeAll(baseLayer, machineOutputLayer(mode.format))
   ).pipe(Layer.provideMerge(NodeServices.layer))
 
   const program = runRoot(root, CLI_VERSION, mode.argv).pipe(Effect.provide(appLayer))
-  const exit: Exit.Exit<void, unknown> = await Effect.runPromiseExit(program)
+
+  // SIGINT interrupts the fiber so Effect finalizers (like the store lock
+  // release) run before the process exits — and writes nothing to stdout.
+  const fiber = Effect.runFork(program)
+  process.on("SIGINT", () => {
+    Effect.runFork(Fiber.interrupt(fiber))
+  })
+  const exit: Exit.Exit<void, unknown> = await Effect.runPromise(Fiber.await(fiber))
 
   const settled = settleExit({ exit, mode, binName: CLI_NAME, describeData })
   write(settled.writes)
   return settled.code
 }
-
-process.on("SIGINT", () => {
-  // Never write to stdout on interrupt — machine output must stay parseable.
-  process.exit(ExitCode.interrupted)
-})
 
 main().then(
   (code) => {
