@@ -25,7 +25,7 @@ Open these only when relevant:
 - [Domain language](CONTEXT.md) — CommandContract, Output Protocol, Verification Profiles, Starter Contract
 - [Adding commands](docs/agents/COMMANDS.md) — contract fields, params, error taxonomy
 - [Output protocol](docs/agents/PROTOCOL.md) — envelopes, exit codes, NDJSON, confirmation flow
-- [Effect patterns](docs/agents/EFFECT.md) — approved patterns, banned escape hatches, `node_modules/effect/AGENTS.md`
+- [Effect patterns](docs/agents/EFFECT.md) — approved patterns, banned escape hatches, `node_modules/effect/AGENTS.md`; the `effect-ts` and `effect-v3-to-v4` skills in `.claude/skills/` cover setup and migration
 - [Testing](docs/agents/TESTING.md) — fake layers, e2e against dist, invariants
 
 ## Commits
