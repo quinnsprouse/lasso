@@ -1,0 +1,8 @@
+node_modules/
+dist/
+coverage/
+.lasso/
+.scratch/
+test-results/
+*.tsbuildinfo
+.DS_Store

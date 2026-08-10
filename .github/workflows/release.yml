@@ -1,0 +1,30 @@
+name: release
+
+# npm trusted publishing (OIDC): configure this repository + workflow as a
+# trusted publisher for the package on npmjs.com, and no NPM_TOKEN is needed —
+# provenance attestations are generated automatically.
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+  id-token: write
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: 24
+          cache: npm
+          registry-url: https://registry.npmjs.org
+      - run: npm ci
+      - run: npm run check:push
+      - run: npm publish
+      - name: attest build artifact
+        uses: actions/attest-build-provenance@e8998f949152b193b063cb0ec769d69d929409be # v2.4.0
+        with:
+          subject-path: dist/bin.cjs

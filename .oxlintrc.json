@@ -1,0 +1,79 @@
+{
+  "$schema": "./node_modules/oxlint/configuration_schema.json",
+  "categories": {
+    "correctness": "error",
+    "suspicious": "error",
+    "perf": "warn"
+  },
+  "plugins": ["typescript", "oxc", "unicorn", "import"],
+  "rules": {
+    "no-console": "error",
+    "typescript/consistent-return": "off",
+    "eslint/no-underscore-dangle": ["error", { "allow": ["_tag"] }],
+    "no-restricted-imports": [
+      "error",
+      {
+        "paths": [
+          {
+            "name": "node:fs",
+            "message": "Use the FileSystem service so tests can swap the layer."
+          },
+          {
+            "name": "node:fs/promises",
+            "message": "Use the FileSystem service so tests can swap the layer."
+          },
+          {
+            "name": "node:process",
+            "message": "Only src/bin.ts touches the process; commands get services."
+          }
+        ],
+        "patterns": [
+          {
+            "group": ["effect/unstable/cli"],
+            "importNamePattern": "^(Command|Flag|Argument|Prompt)$",
+            "message": "Only src/contract/adapter.ts and src/bin.ts may import the parser — commands are defined as contracts."
+          }
+        ]
+      }
+    ]
+  },
+  "overrides": [
+    {
+      "files": ["src/bin.ts", "src/contract/adapter.ts"],
+      "rules": {
+        "no-restricted-imports": [
+          "error",
+          {
+            "paths": [
+              {
+                "name": "node:fs",
+                "message": "Use the FileSystem service so tests can swap the layer."
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "files": ["src/contract/adapter.ts", "src/contract/jsonschema.ts"],
+      "rules": {
+        "typescript/no-unsafe-type-assertion": "off"
+      }
+    },
+    {
+      "files": ["bin/**"],
+      "rules": {
+        "import/no-unassigned-import": "off"
+      }
+    },
+    {
+      "files": ["scripts/**", "test/**"],
+      "rules": {
+        "no-console": "off",
+        "no-restricted-imports": "off",
+        "typescript/no-unsafe-type-assertion": "off"
+      }
+    }
+  ],
+  "ignorePatterns": ["dist/**", "coverage/**", ".lasso/**"]
+}

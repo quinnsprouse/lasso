@@ -1,0 +1,73 @@
+import { describe, expect, it } from "vitest"
+import { FormatNegotiationError, negotiate } from "../../src/output/format.ts"
+
+const base = {
+  argv: [] as ReadonlyArray<string>,
+  stdoutIsTTY: true,
+  stdinIsTTY: true,
+  env: {} as Record<string, string | undefined>,
+}
+
+describe("format negotiation", () => {
+  it("defaults to text on a terminal", () => {
+    expect(negotiate(base).format).toBe("text")
+  })
+
+  it("auto-selects json when stdout is not a terminal", () => {
+    expect(negotiate({ ...base, stdoutIsTTY: false }).format).toBe("json")
+  })
+
+  it("explicit --format text wins over auto-detection", () => {
+    expect(negotiate({ ...base, stdoutIsTTY: false, argv: ["--format", "text"] }).format).toBe(
+      "text",
+    )
+  })
+
+  it("strips global output flags from argv", () => {
+    const mode = negotiate({ ...base, argv: ["task", "list", "--json", "--no-input"] })
+    expect(mode.argv).toEqual(["task", "list"])
+    expect(mode.format).toBe("json")
+    expect(mode.noInput).toBe(true)
+  })
+
+  it("supports --format=<value> syntax", () => {
+    expect(negotiate({ ...base, argv: ["--format=ndjson"] }).format).toBe("ndjson")
+  })
+
+  it("honors LASSO_FORMAT when no flag is given", () => {
+    expect(negotiate({ ...base, env: { LASSO_FORMAT: "json" } }).format).toBe("json")
+  })
+
+  it("flag beats LASSO_FORMAT", () => {
+    expect(
+      negotiate({ ...base, argv: ["--format", "text"], env: { LASSO_FORMAT: "json" } }).format,
+    ).toBe("text")
+  })
+
+  it("treats non-tty stdin as no-input", () => {
+    expect(negotiate({ ...base, stdinIsTTY: false }).noInput).toBe(true)
+  })
+
+  it("treats CI as no-input and disables color", () => {
+    const mode = negotiate({ ...base, env: { CI: "true" } })
+    expect(mode.noInput).toBe(true)
+    expect(mode.color).toBe(false)
+  })
+
+  it("disables color under NO_COLOR and TERM=dumb", () => {
+    expect(negotiate({ ...base, env: { NO_COLOR: "1" } }).color).toBe(false)
+    expect(negotiate({ ...base, env: { TERM: "dumb" } }).color).toBe(false)
+  })
+
+  it("rejects an invalid --format value with the resolved mode attached", () => {
+    try {
+      negotiate({ ...base, stdoutIsTTY: false, argv: ["--format", "yaml"] })
+      expect.unreachable("should have thrown")
+    } catch (error) {
+      if (!(error instanceof FormatNegotiationError)) {
+        throw error
+      }
+      expect(error.mode.format).toBe("json")
+    }
+  })
+})
