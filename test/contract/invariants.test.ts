@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest"
 import { contracts } from "../../src/commands/index.ts"
 import type { ParamSpec } from "../../src/contract/contract.ts"
-import { commandSchemas, describeCli } from "../../src/contract/jsonschema.ts"
+import { commandSchemas, describeCli, schemaDocument } from "../../src/contract/jsonschema.ts"
 import { kebabCase, surfaceOf } from "../../src/contract/surface.ts"
 import { planToken } from "../../src/contract/token.ts"
 import { ERROR_CATALOG } from "../../src/errors.ts"
@@ -183,6 +183,13 @@ describe("describe document", () => {
     expect(document.protocol.errorCatalog.length).toBe(Object.keys(ERROR_CATALOG).length)
     expect(document.protocol.ndjsonEvents).toContain("confirmation_required")
     expect(document.protocol.ndjsonEvents).toContain("progress")
+  })
+
+  it("publishes standalone protocol schemas including the progress event", () => {
+    const document = schemaDocument({ binName: CLI_NAME, version: CLI_VERSION, contracts })
+    const stream = JSON.stringify(document.protocol.streamEvent)
+    expect(stream).toContain('"progress"')
+    expect(document.protocol.envelopes.ok).toHaveProperty("$schema")
   })
 
   it("describes the framework params for mutations and collections", () => {

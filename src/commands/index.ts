@@ -1,6 +1,7 @@
 import type { MutationContract, QueryContract } from "../contract/contract.ts"
 import type { ApplyServices, PlanServices, QueryServices } from "../services/index.ts"
 import { makeIntrospection } from "./introspection.ts"
+import { taskAudit } from "./task-audit.ts"
 import { taskCreate } from "./task-create.ts"
 import { taskList } from "./task-list.ts"
 // generator:imports — scripts/new-command.mjs inserts above this line
@@ -25,6 +26,7 @@ const introspection = makeIntrospection(() => contracts)
  */
 export const contracts: ReadonlyArray<RosterContract> = [
   taskList,
+  taskAudit,
   taskCreate,
   introspection.describe,
   introspection.schema,

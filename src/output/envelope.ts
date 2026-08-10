@@ -52,14 +52,32 @@ export type ConfirmationEnvelope = typeof ConfirmationEnvelope.Type
  * terminal; every stream still ends with exactly one terminal event:
  * `summary`, `confirmation_required`, or `error`.
  */
+const KEBAB_CASE = /^[a-z][a-z0-9]*(-[a-z0-9]+)*$/
+
 export const ProgressEvent = Schema.Struct({
   event: Schema.Literal("progress"),
   /** Stable kebab-case key for the phase of work. */
-  phase: Schema.String,
+  phase: Schema.String.pipe(Schema.check(Schema.isPattern(KEBAB_CASE))),
   message: Schema.NonEmptyString,
-  completed: Schema.optional(Schema.Int),
-  total: Schema.optional(Schema.Int),
-})
+  completed: Schema.optional(Schema.Int.pipe(Schema.check(Schema.isGreaterThanOrEqualTo(0)))),
+  total: Schema.optional(Schema.Int.pipe(Schema.check(Schema.isGreaterThanOrEqualTo(1)))),
+}).pipe(
+  Schema.check(
+    Schema.makeFilter((event: { completed?: number | undefined; total?: number | undefined }) => {
+      if ((event.completed === undefined) !== (event.total === undefined)) {
+        return "completed and total must appear together"
+      }
+      if (
+        event.completed !== undefined &&
+        event.total !== undefined &&
+        event.completed > event.total
+      ) {
+        return "completed must be <= total"
+      }
+      return true
+    }),
+  ),
+)
 
 export type ProgressEvent = typeof ProgressEvent.Type
 

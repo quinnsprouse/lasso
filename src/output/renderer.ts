@@ -1,6 +1,6 @@
 import type { PlatformError } from "effect"
-import { Context, Effect, Layer, Stdio, Stream } from "effect"
-import type { ProgressEvent } from "./envelope.ts"
+import { Context, Effect, Layer, Schema, Stdio, Stream } from "effect"
+import { ProgressEvent } from "./envelope.ts"
 import type { OutputMode } from "./format.ts"
 import type { Outcome } from "./outcome.ts"
 import { renderOutcome } from "./outcome.ts"
@@ -10,6 +10,8 @@ import { renderOutcome } from "./outcome.ts"
  * over `renderOutcome` — the single definition of the wire format — writing
  * through the Stdio service so tests can capture output with a test layer.
  */
+
+const decodeProgress = Schema.decodeUnknownSync(ProgressEvent)
 
 /** Progress input; `completed` and `total` must appear together. */
 export interface ProgressUpdate {
@@ -37,6 +39,10 @@ export class Renderer extends Context.Service<Renderer, RendererApi>()("lasso/ou
       Renderer,
       Effect.gen(function* () {
         const stdio = yield* Stdio.Stdio
+        // The terminal latch: after an outcome is emitted, any further
+        // output through this Renderer is a defect, so a detached reporting
+        // fiber can never write past the terminal event.
+        let terminated = false
 
         const writeTo = (stream: "stdout" | "stderr", text: string) =>
           Stream.make(text).pipe(
@@ -48,36 +54,42 @@ export class Renderer extends Context.Service<Renderer, RendererApi>()("lasso/ou
           )
 
         const progress = (update: ProgressUpdate) => {
-          const { completed, total } = update
-          if ((completed === undefined) !== (total === undefined)) {
-            return Effect.die(new Error("progress requires completed and total together"))
+          if (terminated) {
+            return Effect.die(new Error("progress after the terminal event"))
           }
-          if (
-            completed !== undefined &&
-            total !== undefined &&
-            (completed > total || completed < 0)
-          ) {
-            return Effect.die(new Error("progress requires 0 <= completed <= total"))
-          }
-          if (mode.format === "ndjson") {
-            const event: ProgressEvent = {
+          // One shared contract: the same schema that types the wire event
+          // validates every report (kebab phase, counter pairing, bounds).
+          let event: ProgressEvent
+          try {
+            event = decodeProgress({
               event: "progress",
               phase: update.phase,
               message: update.message,
-              ...(completed !== undefined && total !== undefined ? { completed, total } : {}),
-            }
+              ...(update.completed !== undefined ? { completed: update.completed } : {}),
+              ...(update.total !== undefined ? { total: update.total } : {}),
+            })
+          } catch (cause) {
+            return Effect.die(cause)
+          }
+          if (mode.format === "ndjson") {
             return writeTo("stdout", `${JSON.stringify(event)}\n`)
           }
-          const counter = completed !== undefined ? ` (${completed}/${total})` : ""
-          return writeTo("stderr", `progress[${update.phase}]: ${update.message}${counter}\n`)
+          const counter =
+            event.completed !== undefined ? ` (${event.completed}/${event.total})` : ""
+          return writeTo("stderr", `progress[${event.phase}]: ${event.message}${counter}\n`)
         }
 
         return Renderer.of({
           mode,
-          emit: (outcome) =>
-            Effect.forEach(renderOutcome(mode, binName, outcome), (write) =>
+          emit: (outcome) => {
+            if (terminated) {
+              return Effect.die(new Error("emit after the terminal event"))
+            }
+            terminated = true
+            return Effect.forEach(renderOutcome(mode, binName, outcome), (write) =>
               writeTo(write.stream, write.text),
-            ).pipe(Effect.asVoid),
+            ).pipe(Effect.asVoid)
+          },
           progress,
           note: (message) => writeTo("stderr", `${message}\n`),
         })

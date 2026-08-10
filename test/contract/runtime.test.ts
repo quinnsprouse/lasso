@@ -153,7 +153,92 @@ const progressQuery = defineQuery({
     }),
 })
 
-const contracts = [counterMutation, failingQuery, listQuery, argsQuery, taskCreate, progressQuery]
+const progressFailQuery = defineQuery({
+  name: "counter slowfail",
+  summary: "Progress then an expected failure",
+  stability: "experimental",
+  params: {},
+  dataSchema: Schema.Unknown,
+  domainErrorCodes: ["invalid_data"],
+  examples: [{ command: "lasso counter slowfail --json", description: "fail" }],
+  handler: () =>
+    Effect.gen(function* () {
+      const progress = yield* Progress
+      yield* progress.report({ phase: "warm-up", message: "starting" })
+      const { Errors } = yield* Effect.promise(() => import("../../src/errors.ts"))
+      return yield* Errors.invalidData({ message: "went bad after progress" })
+    }),
+})
+
+const progressMutation = defineMutation({
+  name: "counter slowbump",
+  summary: "Progress during planning",
+  stability: "experimental",
+  params: {},
+  planSchema: Schema.Struct({ ready: Schema.Boolean }),
+  dataSchema: Schema.Struct({ applied: Schema.Boolean }),
+  idempotency: { kind: "none" },
+  domainErrorCodes: [],
+  examples: [{ command: "lasso counter slowbump --json", description: "bump" }],
+  plan: () =>
+    Effect.gen(function* () {
+      const progress = yield* Progress
+      yield* progress.report({ phase: "survey", message: "planning" })
+      return { ready: true }
+    }),
+  apply: () => Effect.succeed({ applied: true }),
+})
+
+const progressListQuery = defineQuery({
+  name: "counter slowlist",
+  summary: "Progress then collection items",
+  stability: "experimental",
+  params: {},
+  dataSchema: Schema.Struct({ items: Schema.Array(Task), count: Schema.Int }),
+  domainErrorCodes: [],
+  examples: [{ command: "lasso counter slowlist --json", description: "list" }],
+  handler: () =>
+    Effect.gen(function* () {
+      const progress = yield* Progress
+      yield* progress.report({ phase: "load", message: "loading" })
+      const reader = yield* StoreReader
+      const items = yield* reader.load
+      return { items, count: items.length }
+    }),
+  collection: {
+    fields: ["id", "title", "status", "createdAt"],
+    items: (encoded) => (encoded as { items: ReadonlyArray<Record<string, unknown>> }).items,
+  },
+})
+
+const badProgressQuery = defineQuery({
+  name: "counter badprogress",
+  summary: "Invalid progress counters are a defect",
+  stability: "experimental",
+  params: {},
+  dataSchema: Schema.Unknown,
+  domainErrorCodes: [],
+  examples: [{ command: "lasso counter badprogress --json", description: "bad" }],
+  handler: () =>
+    Effect.gen(function* () {
+      const progress = yield* Progress
+      yield* progress.report({ phase: "oops", message: "bad counters", completed: 5, total: 2 })
+      return {}
+    }),
+})
+
+const contracts = [
+  counterMutation,
+  failingQuery,
+  listQuery,
+  argsQuery,
+  taskCreate,
+  progressQuery,
+  progressFailQuery,
+  progressMutation,
+  progressListQuery,
+  badProgressQuery,
+]
 
 const seedTask = new Task({
   id: "task_seed",
@@ -494,5 +579,35 @@ describe("progress events", () => {
     const result = await invoke(["counter", "slow"], "text")
     expect(result.stderr).toContain("progress[warm-up]: starting")
     expect(result.stdout).not.toContain("progress")
+  })
+})
+
+describe("progress across the outcome matrix", () => {
+  it("progress precedes an expected error terminal in ndjson", async () => {
+    const result = await invoke(["counter", "slowfail"], "ndjson")
+    expect(result.code).toBe(65)
+    const events = lines(result.stdout, "ndjson")
+    expect(events.map((event) => event["event"])).toEqual(["progress", "error"])
+  })
+
+  it("progress precedes a confirmation_required terminal in ndjson", async () => {
+    const result = await invoke(["counter", "slowbump"], "ndjson")
+    expect(result.code).toBe(4)
+    const events = lines(result.stdout, "ndjson")
+    expect(events.map((event) => event["event"])).toEqual(["progress", "confirmation_required"])
+  })
+
+  it("progress precedes collection items; the stream still ends in summary", async () => {
+    const result = await invoke(["counter", "slowlist"], "ndjson")
+    const events = lines(result.stdout, "ndjson")
+    expect(events.map((event) => event["event"])).toEqual(["progress", "item", "summary"])
+  })
+
+  it("invalid counters become one internal_error with exit 70", async () => {
+    const result = await invoke(["counter", "badprogress"])
+    expect(result.code).toBe(70)
+    const envelopes = lines(result.stdout)
+    expect(envelopes.length).toBe(1)
+    expect(envelopes[0]!.error.code).toBe("internal_error")
   })
 })

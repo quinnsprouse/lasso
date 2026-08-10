@@ -110,11 +110,9 @@ const main = async (): Promise<number> => {
   }
 
   const root = buildRoot(CLI_NAME, CLI_SUMMARY, contracts)
-  const rendererLayer = Renderer.layer(mode, CLI_NAME)
-  const baseLayer = Layer.mergeAll(
-    appServicesLayer.pipe(Layer.provideMerge(rendererLayer)),
-    rendererLayer,
-  )
+  // provideMerge keeps Renderer in the output context, so one layer object
+  // serves both the app services and the runtime — built exactly once.
+  const baseLayer = appServicesLayer.pipe(Layer.provideMerge(Renderer.layer(mode, CLI_NAME)))
   const appLayer = (
     mode.format === "text" ? baseLayer : Layer.mergeAll(baseLayer, machineOutputLayer(mode.format))
   ).pipe(Layer.provideMerge(NodeServices.layer))

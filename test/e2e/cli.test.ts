@@ -231,3 +231,27 @@ describe("machine-mode built-ins", () => {
     expect(result.exitCode).toBe(64)
   })
 })
+
+describe("progress through the shipped binary", () => {
+  it("ndjson: progress events precede the summary, in order", async () => {
+    await run(["task", "create", "One", "--yes", "--json"])
+    const result = await run(["task", "audit", "--format", "ndjson"])
+    expect(result.exitCode).toBe(0)
+    const events = result.stdout
+      .split("\n")
+      .filter((line) => line.length > 0)
+      .map((line) => JSON.parse(line))
+    expect(events.map((event) => event.event)).toEqual(["progress", "progress", "summary"])
+    expect(events[1].completed).toBe(1)
+    expect(events.at(-1)!.data).toEqual({ tasks: 1, duplicateIds: 0 })
+  })
+
+  it("json: stdout is exactly one envelope; progress lines are on stderr", async () => {
+    const result = await run(["task", "audit", "--json"])
+    expect(result.exitCode).toBe(0)
+    const stdoutLines = result.stdout.split("\n").filter((line) => line.length > 0)
+    expect(stdoutLines.length).toBe(1)
+    expect(JSON.parse(stdoutLines[0]!).status).toBe("ok")
+    expect(result.stderr).toContain("progress[load]: reading the task store")
+  })
+})

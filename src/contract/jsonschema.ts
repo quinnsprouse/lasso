@@ -4,7 +4,13 @@ import type { AnyContract } from "./contract.ts"
 import type { CommandSurface, SurfaceParam } from "./surface.ts"
 import { errorCatalogTable, surfaceOf } from "./surface.ts"
 import { ExitCode } from "../output/exit.ts"
-import { SCHEMA_VERSION } from "../output/envelope.ts"
+import {
+  ConfirmationEnvelope,
+  ErrorEnvelope,
+  OkEnvelope,
+  SCHEMA_VERSION,
+  StreamEvent,
+} from "../output/envelope.ts"
 
 /**
  * Serializes the normalized command surfaces into the two introspection
@@ -175,5 +181,13 @@ export const schemaDocument = (options: {
   schemaVersion: SCHEMA_VERSION,
   dialect: DIALECT,
   cli: { name: options.binName, version: options.version },
+  protocol: {
+    envelopes: {
+      ok: standaloneSchema(OkEnvelope.ast),
+      error: standaloneSchema(ErrorEnvelope.ast),
+      confirmationRequired: standaloneSchema(ConfirmationEnvelope.ast),
+    },
+    streamEvent: standaloneSchema(StreamEvent.ast),
+  },
   commands: options.contracts.map(commandSchemas),
 })
