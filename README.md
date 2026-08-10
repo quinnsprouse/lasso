@@ -1,73 +1,115 @@
 # Lasso 🪢
 
-An agent-first CLI starter kit. The machine surface — JSON envelopes, semantic exit codes, a structured confirmation protocol, runtime introspection — is the default; the human TTY experience is the fallback. Built whole-app on [Effect](https://effect.website) v4 with a contract layer that makes protocol violations fail the build, not the user.
+Rope your commands. Arm your agents. Ship with proof.
 
-Requires Node 22.18+ (24 LTS recommended), npm 10+, and Git. Developed and CI-tested on Linux and macOS; Windows is untested.
+An opinionated starter kit for CLIs whose primary user is an AI agent — the agent that edits this repository and the agent that runs the installed binary. Built on Effect v4 with a contract layer that turns protocol violations into build failures.
 
-## Quick start
+Requires Node 22.18 or newer (24 LTS recommended), npm 10 or newer, and Git. Tested on Linux and macOS.
+
+## Quick Start
 
 ```bash
 npx degit <you>/lasso my-cli
 cd my-cli
 git init --initial-branch=main
 npm ci
-npm run setup                      # installs git hooks
-node scripts/rename.mjs my-cli     # make it yours (required before publishing:
-                                   # "lasso" is taken on npm, and the trusted
-                                   # publisher is configured per package name)
+npm run setup                    # install git hooks
+node scripts/rename.mjs my-cli   # take your name everywhere
 npm run dev -- task list --json
 ```
 
-Before the first publish, also point `repository` in package.json at your repo — npm provenance verifies it against the workflow's origin.
+Rename before you publish. The name `lasso` is taken on npm, and the trusted publisher on npmjs.com is configured per package name.
 
-## Why this kit
+## Make It Yours
 
-**Agents are the primary user.** Every design decision follows from that:
+Point `repository` in `package.json` at your repo — npm provenance verifies it against the workflow origin. Then replace the demo `task` domain: scaffold commands with `node scripts/new-command.mjs <group> <name>`, and delete `src/commands/task-*.ts`, `src/domain/`, and `src/services/store.ts` when you no longer need the example.
 
-- **One envelope, everywhere.** `{ schemaVersion, status, data | error, warnings }` on stdout; diagnostics on stderr; JSON automatically when stdout is not a TTY. Errors carry a machine `code`, an executable `fix`, and a `transient` flag so a caller knows whether to retry or change course.
-- **Semantic exit codes.** 4 = confirmation required, 64 usage, 65 data, 69 unavailable, 73 conflict, 75 transient, 77 auth, 78 config, 130 interrupted. Frozen, additively.
-- **Mutations are plan → confirm → apply.** An unconfirmed mutation exits 4 with the plan and a `confirmArgs` array; the token hash-binds the plan, so nothing ever applies that wasn't previewed. `--dry-run` and `--yes` come free with every mutation — structurally, from the contract type.
-- **Runtime introspection.** `mycli describe --json` and `mycli schema --json` (JSON Schema 2020-12) replace help-text parsing. `--help --json` answers with the same payload.
-- **Guardrails that fail mechanically.** Typed error channels, Schema-validated output, contract-invariant tests, type-aware oxlint, Effect language-service diagnostics, and a lint-enforced renderer monopoly on stdout — all in a sub-4-second `npm run check`.
-
-## Daily commands
+## Daily Commands
 
 ```bash
-npm run dev -- <args>   # run from source
-npm run check           # Fast profile: format, lint, types, diagnostics, unit tests
-npm run check:push      # + build, dead code, e2e against dist, pack smoke (pre-push hook)
-npm run check:ci        # + coverage, Starter Contract (CI)
-node scripts/new-command.mjs <group> <name>   # scaffold a command, Fast stays green
-npm run build           # bundle dist/bin.cjs (self-contained, zero runtime deps)
+npm run dev -- <args>  # run from source
+npm run check          # Fast Profile: format, lint, types, diagnostics, unit tests
+npm run check:push     # Push Profile: check + build, dead code, e2e, pack smoke
+npm run check:ci       # CI Profile: push + coverage + Starter Contract
+npm run build          # bundle dist/bin.cjs (self-contained, zero runtime deps)
+npm run test:contract  # replay the Starter Contract locally
+npm run setup          # install hooks after a late git init
 ```
 
-## The shape of a command
+## The Machine Protocol
 
-Commands are contracts; the parser, help, `describe`, JSON Schema, and docs are generated from them. See `docs/agents/COMMANDS.md` for the full reference:
+Agents read stdout; humans read stderr. Every invocation ends in exactly one result:
 
-```ts
-export const taskList = defineQuery({
-  name: "task list",
-  summary: "List tasks",
-  params: { status: { kind: "flag", type: "choice", choices: ["open", "done", "all"], default: "open", description: "Filter tasks by status" } },
-  dataSchema: TaskList,
-  handler: Effect.fn("taskList.handler")(function* (input) { /* services in, data out */ }),
-  // …
-})
-// …then add it to the roster in src/commands/index.ts (or use the generator).
+```json
+{ "schemaVersion": "1", "status": "ok", "data": {}, "warnings": [] }
 ```
 
-## Verification
+- Errors carry a stable `code`, an executable `fix`, and a `transient` flag that tells the caller whether to retry.
+- Exit codes are semantic: 4 confirmation required, 64 usage, 65 data, 73 conflict, 75 transient, 130 interrupted.
+- Mutations run plan → confirm → apply. An unconfirmed mutation exits 4 with the plan and a replayable `confirmArgs` array. Every mutation gets `--dry-run` and `--yes` from the contract type.
+- `mycli describe --json` and `mycli schema --json` replace help-text parsing.
 
-Three nested profiles, defined once in `scripts/verify.mjs`; the pre-push hook and CI run the identical commands. The **Starter Contract** (`npm run test:contract`) replays the whole fresh-clone journey — install, hooks, build, protocol behavior, generator round-trip, pack hygiene — from a clean `git archive` in a temp dir.
+The full protocol lives in [docs/agents/PROTOCOL.md](docs/agents/PROTOCOL.md).
+
+## Feedback Loop
+
+Verification is defined once, in `scripts/verify.mjs`:
+
+1. `npm run check` runs the **Fast Profile**: format, lint, types, Effect diagnostics, and unit tests. Under 5 seconds.
+2. `npm run check:push` runs the **Push Profile**: Fast plus build, dead code, e2e against `dist`, and a pack smoke test.
+3. `npm run check:ci` runs the **CI Profile**: Push plus coverage and the Starter Contract.
+
+Lefthook owns the Git hook seam:
+
+- **pre-commit**: format and lint staged files
+- **commit-msg**: commitlint enforces Conventional Commits
+- **pre-push**: `npm run check:push`
+
+Local and CI run identical commands, so local green means CI green.
+
+## Starter Contract
+
+`npm run test:contract` copies `git archive HEAD` into a temp directory and proves every advertised guarantee: lockfile-exact install, working hooks, a bootable build, the JSON protocol, the confirmation flow, a generator round-trip, a full rename and back, and a clean pack. Failures preserve the temp directory as evidence.
 
 ## Stack
 
-Effect 4 (beta, exact-pinned) · effect/unstable/cli behind a kit-owned adapter · TypeScript 7 · oxlint (type-aware) · Biome (format) · tsdown → self-contained CJS · Vitest 4 + execa + fast-check · lefthook + commitlint · knip
+- [Effect](https://effect.website) v4 (exact-pinned beta) — typed errors, Schema, services, `effect/unstable/cli`
+- TypeScript 7 (strict) + [oxlint](https://oxc.rs) type-aware + [Biome](https://biomejs.dev) format
+- [tsdown](https://tsdown.dev) → one self-contained CJS bundle
+- [Vitest](https://vitest.dev) + execa + fast-check
+- [lefthook](https://lefthook.dev) + commitlint + [knip](https://knip.dev)
 
-## Docs
+## Key Conventions
 
-`AGENTS.md` is the agent entry point (CLAUDE.md symlinks to it). Progressive disclosure in `docs/agents/`; domain language in `CONTEXT.md`.
+- **Commands are contracts** — `defineQuery`/`defineMutation`; one adapter file imports the parser. Lint enforces this.
+- **Mutations plan before they apply** — the runtime owns `--dry-run`, `--confirm`, `--yes`; plans are deterministic, and the confirmation token binds them.
+- **stdout is data** — only the renderer writes it. Lint blocks `process` and `console` everywhere else.
+- **The surface changes additively** — never rename commands, flags, exit codes, or envelope fields.
+
+## Project Layout
+
+```
+src/
+  bin.ts        # process boundary: the only Effect.run* and process access
+  runtime.ts    # exit settlement, shared with tests
+  contract/     # defineQuery/defineMutation, surface, parser adapter, tokens
+  output/       # format negotiation, outcome renderer, envelopes, exit codes
+  commands/     # contracts + the roster (index.ts)
+  services/     # capability services (StoreReader, StoreWriter)
+  domain/       # demo task domain
+test/
+  unit/         # handlers through fake layers
+  contract/     # protocol invariants + in-process runtime matrix
+  e2e/          # execa against dist/bin.cjs
+scripts/        # verify profiles, generators, Starter Contract
+docs/agents/    # progressive-disclosure references
+```
+
+## AI Agent Docs
+
+- `AGENTS.md` is the entry point (minimal, links to detailed docs). `CLAUDE.md` is symlinked to it.
+- `CONTEXT.md` defines the domain language: CommandContract, Output Protocol, Verification Profiles, Starter Contract.
+- Detailed guidance lives in `docs/agents/`. Effect ships its own agent docs in `node_modules/effect/AGENTS.md`.
 
 ## License
 

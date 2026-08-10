@@ -1,7 +1,7 @@
-Agent-first CLI starter kit: Effect v4 + effect/unstable/cli behind a kit-owned CommandContract. Machine output by default; guardrails fail mechanically.
+Agent-first CLI starter kit: Effect v4 + effect/unstable/cli behind a kit-owned CommandContract. Machine output by default; guardrails fail the build, not the user.
 
 - Quality gate: `npm run check` (format + type-aware lint + types + Effect diagnostics + unit tests, <5s)
-- Push gate: `npm run check:push` (check + build + knip + e2e against dist + pack smoke)
+- Push gate: `npm run check:push` (check + build + dead code + e2e against dist + pack smoke)
 - CI gate: `npm run check:ci` (push + coverage + Starter Contract)
 - New command: `node scripts/new-command.mjs <group> <name>` (scaffolds, registers, Fast stays green)
 - Try it: `npm run dev -- task list --json`
@@ -11,11 +11,11 @@ Put disposable experiments in `.scratch/` or the OS temp directory, never the re
 
 ## Rules
 
-1. Commands are contracts (`defineQuery`/`defineMutation`), never raw parser code — only `src/contract/adapter.ts` imports the parser, only `src/bin.ts` touches `process` (lint-enforced).
-2. Mutations are `plan` + `apply`; the runtime owns `--dry-run`, `--confirm`, `--yes`.
+1. Commands are contracts (`defineQuery`/`defineMutation`), never raw parser code. Only `src/contract/adapter.ts` imports the parser; only `src/bin.ts` touches `process`. Lint enforces both.
+2. Mutations are `plan` + `apply`. The runtime owns `--dry-run`, `--confirm`, `--yes`.
 3. Expected failures are `Errors.*` AppErrors with an executable `fix`.
 4. Only the Renderer writes stdout; diagnostics go to stderr.
-5. The CLI surface changes additively only — never rename commands, flags, exit codes, or envelope fields.
+5. The surface changes additively only — never rename commands, flags, exit codes, or envelope fields.
 
 ## Progressive Disclosure
 
