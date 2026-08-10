@@ -397,6 +397,7 @@ const quietConsole: Console.Console = Object.assign(Object.create(globalThis.con
     if (args.every((arg) => typeof arg === "string" && arg.trim() === "")) {
       return
     }
+    // oxlint-disable-next-line effecttsgo/global-console -- this IS the console shim
     globalThis.console.log(...args)
   },
 })
@@ -485,7 +486,7 @@ const usageErrorFrom = (error: CliError.CliError, binName: string): AppErrorLike
 
 /** Translates parser errors into kit-owned failures; returns null for non-parser errors. */
 export const classifyParserError = (error: unknown, binName: string): RunFailure => {
-  if (error instanceof CliError.ShowHelp) {
+  if (CliError.isCliError(error) && error._tag === "ShowHelp") {
     return error.errors.length === 0
       ? { kind: "help", parseErrors: [] }
       : {

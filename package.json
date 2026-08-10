@@ -33,7 +33,9 @@
     "knip": "knip",
     "setup": "lefthook install",
     "test:e2e": "vitest run test/e2e",
-    "prepack": "TSDOWN_SKIP_PUBLINT=1 tsdown --logLevel silent"
+    "prepack": "TSDOWN_SKIP_PUBLINT=1 tsdown --logLevel silent",
+    "setup:skills": "npx skills experimental_install",
+    "prepare": "effect-tsgo patch --oxlint"
   },
   "devDependencies": {
     "@biomejs/biome": "2.5.7",

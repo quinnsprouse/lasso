@@ -1,6 +1,8 @@
 # Effect patterns
 
-This kit uses Effect v4 (beta, exact-pinned). The package ships its own agent docs: read `node_modules/effect/AGENTS.md` and the compile-checked examples in `node_modules/effect/ai-docs/src/` when you need API details. The `effect-tsgo` diagnostics in the Fast profile catch most misuse mechanically — trust the gate.
+This kit uses Effect v4 (beta, exact-pinned). The package ships its own agent docs: read `node_modules/effect/AGENTS.md` and the compile-checked examples in `node_modules/effect/ai-docs/src/` when you need API details — they match the installed version, unlike web docs. The `effect-ts` skill in `.claude/skills/` teaches the same habit.
+
+Misuse is caught mechanically at three points: ~90 `effecttsgo/*` oxlint rules (extended from `@effect/tsgo` presets in `.oxlintrc.json`), the `effect-tsgo diagnostics` step in every profile, and the post-edit hook, which runs both on each edited file. Trust the gates.
 
 ## The approved patterns
 

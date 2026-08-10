@@ -122,6 +122,7 @@ export const negotiate = (options: NegotiateOptions): OutputMode => {
 }
 
 /** Carries the already-resolved mode so the error itself can be rendered in it. */
+// oxlint-disable-next-line effecttsgo/extends-native-error -- thrown before the Effect runtime exists
 export class FormatNegotiationError extends Error {
   readonly mode: OutputMode
 

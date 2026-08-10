@@ -1,4 +1,4 @@
-import { Cause, Exit } from "effect"
+import { Cause, Exit, Schema } from "effect"
 import type { RunFailure } from "./contract/adapter.ts"
 import { classifyParserError, ExitSignal } from "./contract/adapter.ts"
 import { AppError } from "./errors.ts"
@@ -37,10 +37,10 @@ export const settleExit = (options: {
   const failure = Cause.findErrorOption(exit.cause)
   if (failure._tag === "Some") {
     const error = failure.value
-    if (error instanceof ExitSignal) {
+    if (Schema.is(ExitSignal)(error)) {
       return { writes: [], code: error.code }
     }
-    if (error instanceof AppError) {
+    if (Schema.is(AppError)(error)) {
       return {
         writes: render({
           kind: "failure",

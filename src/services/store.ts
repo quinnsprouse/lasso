@@ -6,6 +6,9 @@ const StoreFile = Schema.Struct({
   tasks: Schema.Array(Task),
 })
 
+// The file codec: string ⇄ validated store, one schema pass, no bare JSON.parse.
+const StoreFileJson = Schema.fromJsonString(StoreFile)
+
 /**
  * Read and write capabilities are separate services: `plan` handlers get
  * StoreReader, `apply` handlers get StoreWriter. A mutation that tries to
@@ -67,18 +70,10 @@ const loadFrom = Effect.fn("store.load")(function* (fs: FileSystem.FileSystem, f
         Errors.cannotWrite({ message: `cannot read ${file}: ${cause.message}` }),
       ),
     )
-  const parsed = yield* Effect.try({
-    try: () => JSON.parse(raw) as unknown,
-    catch: () =>
-      Errors.config({
-        message: `${file} is not valid JSON`,
-        fix: `inspect ${file} and repair or delete it`,
-      }),
-  })
-  const decoded = yield* Schema.decodeUnknownEffect(StoreFile)(parsed).pipe(
+  const decoded = yield* Schema.decodeEffect(StoreFileJson)(raw).pipe(
     Effect.mapError((cause) =>
       Errors.config({
-        message: `${file} does not match the store schema: ${cause.message}`,
+        message: `${file} is not a valid task store: ${cause.message}`,
         fix: `inspect ${file} and repair or delete it`,
       }),
     ),
@@ -149,7 +144,7 @@ export class StoreWriter extends Context.Service<StoreWriter, StoreWriterApi>()(
                 if (next === null) {
                   return current
                 }
-                const encoded = yield* Schema.encodeEffect(StoreFile)({ tasks: next }).pipe(
+                const encoded = yield* Schema.encodeEffect(StoreFileJson)({ tasks: next }).pipe(
                   Effect.mapError((cause) =>
                     Errors.invalidData({ message: `tasks failed to encode: ${cause.message}` }),
                   ),
@@ -158,7 +153,7 @@ export class StoreWriter extends Context.Service<StoreWriter, StoreWriterApi>()(
                 tmpCounter += 1
                 const tmp = `${file}.${stamp.toString(36)}.${tmpCounter}.tmp`
                 yield* fs
-                  .writeFileString(tmp, `${JSON.stringify(encoded, null, 2)}\n`)
+                  .writeFileString(tmp, `${encoded}\n`)
                   .pipe(Effect.mapError(asCannotWrite(`write ${tmp}`)))
                 yield* fs.rename(tmp, file).pipe(Effect.mapError(asCannotWrite(`replace ${file}`)))
                 return next

@@ -40,3 +40,19 @@ try {
     process.exit(2)
   }
 }
+
+// Effect-specific diagnostics on the edited file: floating Effects, missing
+// contexts, and generator slips surface now, not at check time.
+try {
+  execFileSync(
+    "npx",
+    ["effect-tsgo", "diagnostics", "--file", filePath, "--strict", "--format", "text"],
+    { encoding: "utf8", timeout: 60000 },
+  )
+} catch (error) {
+  const output = `${error.stdout ?? ""}${error.stderr ?? ""}`
+  if (output.includes("error effect(")) {
+    process.stderr.write(output.slice(0, 4000))
+    process.exit(2)
+  }
+}

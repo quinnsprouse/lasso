@@ -1,5 +1,5 @@
 {
-  "$schema": "./node_modules/oxlint/configuration_schema.json",
+  "$schema": "./node_modules/@effect/tsgo/oxlint-schema.json",
   "categories": {
     "correctness": "error",
     "suspicious": "error",
@@ -65,7 +65,9 @@
               }
             ]
           }
-        ]
+        ],
+        "effecttsgo/async-function": "off",
+        "effecttsgo/strict-effect-provide": "off"
       }
     },
     {
@@ -107,9 +109,18 @@
         "no-console": "off",
         "no-restricted-imports": "off",
         "typescript/no-unsafe-type-assertion": "off",
-        "no-restricted-globals": "off"
+        "no-restricted-globals": "off",
+        "effecttsgo/node-builtin-import": "off",
+        "effecttsgo/global-date": "off",
+        "effecttsgo/process-env": "off",
+        "effecttsgo/global-console": "off",
+        "effecttsgo/strict-effect-provide": "off",
+        "effecttsgo/async-function": "off",
+        "effecttsgo/unsafe-effect-type-assertion": "off",
+        "effecttsgo/any-unknown-in-error-context": "off"
       }
     }
   ],
-  "ignorePatterns": ["dist/**", "coverage/**", ".lasso/**"]
+  "ignorePatterns": ["dist/**", "coverage/**", ".lasso/**"],
+  "extends": ["./node_modules/@effect/tsgo/oxlint-presets/recommended.json"]
 }

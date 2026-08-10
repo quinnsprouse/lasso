@@ -6,6 +6,7 @@ Agent-first CLI starter kit: Effect v4 + effect/unstable/cli behind a kit-owned 
 - New command: `node scripts/new-command.mjs <group> <name>` (scaffolds, registers, Fast stays green)
 - Try it: `npm run dev -- task list --json`
 - Hook recovery after `git init`: `npm run setup`
+- Restore pinned skills: `npm run setup:skills`
 
 Put disposable experiments in `.scratch/` or the OS temp directory, never the repository root.
 

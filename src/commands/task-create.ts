@@ -1,4 +1,4 @@
-import { Clock, Effect, Schema } from "effect"
+import { Clock, DateTime, Effect, Schema } from "effect"
 import { Task, taskId } from "../domain/task.ts"
 import { StoreReader, StoreWriter } from "../services/store.ts"
 import { Errors } from "../errors.ts"
@@ -110,7 +110,7 @@ export const taskCreate = defineMutation({
       return { created: false, task: existing }
     }
     const now = yield* Clock.currentTimeMillis
-    const task = new Task({ ...plan.task, createdAt: new Date(now).toISOString() })
+    const task = new Task({ ...plan.task, createdAt: DateTime.formatIso(DateTime.makeUnsafe(now)) })
     let conflicted = false
     const tasks = yield* writer.modify((current) => {
       if (current.some((existing) => existing.id === task.id)) {
