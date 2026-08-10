@@ -12,9 +12,13 @@ cd my-cli
 git init --initial-branch=main
 npm ci
 npm run setup                      # installs git hooks
-node scripts/rename.mjs my-cli     # make it yours
+node scripts/rename.mjs my-cli     # make it yours (required before publishing:
+                                   # "lasso" is taken on npm, and the trusted
+                                   # publisher is configured per package name)
 npm run dev -- task list --json
 ```
+
+Before the first publish, also point `repository` in package.json at your repo — npm provenance verifies it against the workflow's origin.
 
 ## Why this kit
 

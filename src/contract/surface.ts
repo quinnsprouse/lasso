@@ -89,18 +89,38 @@ const frameworkErrorCodes = (contract: AnyContract): ReadonlyArray<ErrorCode> =>
 export const surfaceOf = (contract: AnyContract): CommandSurface => {
   const contractParams: Array<SurfaceParam> = Object.entries(
     contract.params as Record<string, ParamSpec>,
-  ).map(([key, spec]) => ({
-    key,
-    cliName: spec.kind === "argument" ? `<${kebabCase(key)}>` : `--${kebabCase(key)}`,
-    kind: spec.kind,
-    type: spec.type,
-    description: spec.description,
-    required: spec.kind === "argument",
-    owner: "contract",
-    ...("alias" in spec && spec.alias !== undefined ? { alias: spec.alias } : {}),
-    ...("default" in spec && spec.default !== undefined ? { default: spec.default } : {}),
-    ...("choices" in spec && spec.choices !== undefined ? { choices: [...spec.choices] } : {}),
-  }))
+  ).map(([key, spec]) => {
+    const param: {
+      key: string
+      cliName: string
+      kind: "argument" | "flag"
+      type: SurfaceParam["type"]
+      description: string
+      required: boolean
+      owner: "contract"
+      alias?: string
+      default?: string | number | boolean
+      choices?: ReadonlyArray<string>
+    } = {
+      key,
+      cliName: spec.kind === "argument" ? `<${kebabCase(key)}>` : `--${kebabCase(key)}`,
+      kind: spec.kind,
+      type: spec.type,
+      description: spec.description,
+      required: spec.kind === "argument",
+      owner: "contract",
+    }
+    if ("alias" in spec && spec.alias !== undefined) {
+      param.alias = spec.alias
+    }
+    if ("default" in spec && spec.default !== undefined) {
+      param.default = spec.default
+    }
+    if ("choices" in spec && spec.choices !== undefined) {
+      param.choices = [...spec.choices]
+    }
+    return param
+  })
 
   const framework: Array<SurfaceParam> =
     contract.kind === "mutation"

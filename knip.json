@@ -1,5 +1,6 @@
 {
   "$schema": "https://unpkg.com/knip@6/schema.json",
   "entry": ["scripts/*.mjs", "test/**/*.test.ts", "test/contract/type-fixtures.ts"],
-  "project": ["src/**", "scripts/**", "test/**"]
+  "project": ["src/**", "scripts/**", "test/**"],
+  "ignoreDependencies": ["@effect/language-service"]
 }

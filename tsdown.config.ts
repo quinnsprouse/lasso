@@ -8,8 +8,16 @@ export default defineConfig({
   platform: "node",
   target: "node22",
   // Ship self-contained: the published package has zero runtime dependencies.
-  noExternal: /^(?!node:)/,
+  // onlyBundle is an allowlist — an unexpected dependency in the bundle is a
+  // build error, not a silent size increase.
+  deps: {
+    alwaysBundle: /^(?!node:)/,
+    onlyBundle: ["effect", "@effect/platform-node", "@effect/platform-node-shared"],
+  },
   minify: false,
+  // effect's ConfigProvider probes import.meta?.env; under CJS it falls back
+  // to process.env, so replacing import.meta with {} is the intended result.
+  define: { "import.meta": "{}" },
   dts: false,
   sourcemap: false,
   publint: true,

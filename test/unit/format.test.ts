@@ -71,3 +71,32 @@ describe("format negotiation", () => {
     }
   })
 })
+
+describe("terminator and conflicts", () => {
+  it("leaves everything after -- for the parser", () => {
+    const mode = negotiate({ ...base, argv: ["task", "create", "--", "--json", "--format"] })
+    expect(mode.argv).toEqual(["task", "create", "--", "--json", "--format"])
+    expect(mode.format).toBe("text")
+  })
+
+  it("rejects conflicting explicit formats", () => {
+    expect(() => negotiate({ ...base, argv: ["--json", "--format", "ndjson"] })).toThrow(
+      FormatNegotiationError,
+    )
+  })
+
+  it("rejects a missing --format value", () => {
+    expect(() => negotiate({ ...base, argv: ["--format"] })).toThrow(FormatNegotiationError)
+  })
+
+  it("rejects an invalid LASSO_FORMAT instead of ignoring it", () => {
+    expect(() => negotiate({ ...base, env: { LASSO_FORMAT: "yaml" } })).toThrow(
+      FormatNegotiationError,
+    )
+  })
+
+  it("records an explicit help request", () => {
+    expect(negotiate({ ...base, argv: ["--help"] }).helpRequested).toBe(true)
+    expect(negotiate({ ...base, argv: ["--", "--help"] }).helpRequested).toBe(false)
+  })
+})

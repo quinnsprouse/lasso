@@ -5,7 +5,8 @@ pre-commit:
   jobs:
     - name: format staged
       glob: "*.{ts,mjs,json,md}"
-      run: npx biome format --write --no-errors-on-unmatched {staged_files} && git update-index --again
+      run: npx biome format --write --no-errors-on-unmatched {staged_files}
+      stage_fixed: true
     - name: lint staged
       glob: "*.{ts,mjs}"
       run: npx oxlint {staged_files}

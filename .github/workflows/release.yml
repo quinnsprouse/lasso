@@ -2,29 +2,33 @@ name: release
 
 # npm trusted publishing (OIDC): configure this repository + workflow as a
 # trusted publisher for the package on npmjs.com, and no NPM_TOKEN is needed —
-# provenance attestations are generated automatically.
+# provenance attestations are generated automatically. Provenance requires the
+# `repository` field in package.json to match this repo.
 on:
   push:
     tags: ["v*"]
 
 permissions:
-  contents: write
+  contents: read
   id-token: write
+  attestations: write
 
 jobs:
   publish:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
-      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: 24
           cache: npm
           registry-url: https://registry.npmjs.org
       - run: npm ci
       - run: npm run check:push
-      - run: npm publish
+      # Attest BEFORE publishing: a failed attestation must never leave an
+      # unattested package already public.
       - name: attest build artifact
-        uses: actions/attest-build-provenance@e8998f949152b193b063cb0ec769d69d929409be # v2.4.0
+        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
         with:
           subject-path: dist/bin.cjs
+      - run: npm publish

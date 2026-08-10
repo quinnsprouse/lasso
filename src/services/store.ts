@@ -35,46 +35,42 @@ const LOCK = "tasks.lock"
 // Uniquifies temp files within one process; the lock serializes across processes.
 let tmpCounter = 0
 
-const loadFrom = (
-  fs: FileSystem.FileSystem,
-  file: string,
-): Effect.Effect<ReadonlyArray<Task>, AppError> =>
-  Effect.gen(function* () {
-    const exists = yield* fs
-      .exists(file)
-      .pipe(
-        Effect.mapError((cause) =>
-          Errors.cannotWrite({ message: `cannot access ${file}: ${cause.message}` }),
-        ),
-      )
-    if (!exists) {
-      return []
-    }
-    const raw = yield* fs
-      .readFileString(file)
-      .pipe(
-        Effect.mapError((cause) =>
-          Errors.cannotWrite({ message: `cannot read ${file}: ${cause.message}` }),
-        ),
-      )
-    const parsed = yield* Effect.try({
-      try: () => JSON.parse(raw) as unknown,
-      catch: () =>
-        Errors.config({
-          message: `${file} is not valid JSON`,
-          fix: `inspect ${file} and repair or delete it`,
-        }),
-    })
-    const decoded = yield* Schema.decodeUnknownEffect(StoreFile)(parsed).pipe(
+const loadFrom = Effect.fn("store.load")(function* (fs: FileSystem.FileSystem, file: string) {
+  const exists = yield* fs
+    .exists(file)
+    .pipe(
       Effect.mapError((cause) =>
-        Errors.config({
-          message: `${file} does not match the store schema: ${cause.message}`,
-          fix: `inspect ${file} and repair or delete it`,
-        }),
+        Errors.cannotWrite({ message: `cannot access ${file}: ${cause.message}` }),
       ),
     )
-    return decoded.tasks
+  if (!exists) {
+    return []
+  }
+  const raw = yield* fs
+    .readFileString(file)
+    .pipe(
+      Effect.mapError((cause) =>
+        Errors.cannotWrite({ message: `cannot read ${file}: ${cause.message}` }),
+      ),
+    )
+  const parsed = yield* Effect.try({
+    try: () => JSON.parse(raw) as unknown,
+    catch: () =>
+      Errors.config({
+        message: `${file} is not valid JSON`,
+        fix: `inspect ${file} and repair or delete it`,
+      }),
   })
+  const decoded = yield* Schema.decodeUnknownEffect(StoreFile)(parsed).pipe(
+    Effect.mapError((cause) =>
+      Errors.config({
+        message: `${file} does not match the store schema: ${cause.message}`,
+        fix: `inspect ${file} and repair or delete it`,
+      }),
+    ),
+  )
+  return decoded.tasks
+})
 
 export class StoreReader extends Context.Service<StoreReader, StoreReaderApi>()(
   "lasso/services/StoreReader",

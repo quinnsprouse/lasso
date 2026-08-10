@@ -10,7 +10,7 @@ import { spawnSync } from "node:child_process"
 const profiles = {
   fast: [
     ["fmt:check", "npx", "biome", "format", "."],
-    ["lint", "npx", "oxlint", "--type-aware"],
+    ["lint", "npx", "oxlint", "--type-aware", "--deny-warnings"],
     ["typecheck", "npx", "tsc", "--noEmit"],
     [
       "effect diagnostics",

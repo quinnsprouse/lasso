@@ -106,14 +106,35 @@ const listQuery = defineQuery({
     }),
   collection: {
     fields: ["id", "title", "status", "createdAt"],
-    items: (encoded) =>
-      (encoded as { items: ReadonlyArray<Record<string, unknown>> }).items.map((item) => ({
-        ...item,
-      })),
+    items: (encoded) => (encoded as { items: ReadonlyArray<Record<string, unknown>> }).items,
   },
 })
 
-const contracts = [counterMutation, failingQuery, listQuery]
+const argsQuery = defineQuery({
+  name: "counter args",
+  summary: "Test argument types",
+  stability: "experimental",
+  params: {
+    count: { kind: "argument", type: "integer", description: "How many" },
+    level: {
+      kind: "argument",
+      type: "choice",
+      choices: ["low", "high"],
+      description: "Which level",
+    },
+    target: { kind: "argument", type: "path", description: "Where" },
+  },
+  dataSchema: Schema.Struct({
+    count: Schema.Int,
+    level: Schema.String,
+    target: Schema.String,
+  }),
+  domainErrorCodes: [],
+  examples: [{ command: "lasso counter args 2 low ./x --json", description: "args" }],
+  handler: (input) => Effect.succeed(input),
+})
+
+const contracts = [counterMutation, failingQuery, listQuery, argsQuery]
 
 const seedTask = new Task({
   id: "task_seed",
@@ -267,6 +288,7 @@ describe("mutation state machine", () => {
       ["counter", "bump", "--dry-run", "--confirm", "plan_x"],
       ["counter", "bump", "--yes", "--confirm", "plan_x"],
     ]) {
+      // oxlint-disable-next-line eslint/no-await-in-loop -- sequential protocol checks
       const result = await invoke(argv)
       expect(result.code).toBe(64)
       expect(lines(result.stdout)[0]!.error.code).toBe("invalid_usage")
@@ -308,6 +330,7 @@ describe("outcome matrix — stream shapes", () => {
 
   it("expected errors keep details, fix, and transient in every machine mode", async () => {
     for (const format of ["json", "ndjson"] as const) {
+      // oxlint-disable-next-line eslint/no-await-in-loop -- sequential protocol checks
       const result = await invoke(["counter", "fail"], format)
       expect(result.code).toBe(65)
       const event = lines(result.stdout, format === "json" ? "json" : "ndjson")[0]!
@@ -360,5 +383,37 @@ describe("projection", () => {
     await invoke(["counter", "bump", "--dry-run"])
     expect(lastPlanInput).not.toHaveProperty("fields")
     expect(lastPlanInput).not.toHaveProperty("dryRun")
+  })
+})
+
+describe("parser failures settle through the kit-owned classification", () => {
+  it("unknown subcommand: one invalid_usage envelope, exit 64, describe as fix", async () => {
+    const result = await invoke(["nonsense"])
+    expect(result.code).toBe(64)
+    const envelope = lines(result.stdout)[0]!
+    expect(envelope.error.code).toBe("invalid_usage")
+    expect(envelope.error.fix).toContain("describe")
+  })
+
+  it("unrecognized flag and missing argument map to invalid_usage", async () => {
+    const flag = await invoke(["counter", "bump", "--bogus"])
+    expect(flag.code).toBe(64)
+    expect(lines(flag.stdout)[0]!.error.message).toContain("--bogus")
+
+    const missing = await invoke(["counter", "args"])
+    expect(missing.code).toBe(64)
+  })
+
+  it("invalid values for typed arguments are usage errors", async () => {
+    const result = await invoke(["counter", "args", "two", "low", "./x"])
+    expect(result.code).toBe(64)
+  })
+
+  it("typed arguments parse and round-trip", async () => {
+    const result = await invoke(["counter", "args", "2", "high", "./somewhere"])
+    expect(result.code).toBe(0)
+    const envelope = lines(result.stdout)[0]!
+    expect(envelope.data.count).toBe(2)
+    expect(envelope.data.level).toBe("high")
   })
 })

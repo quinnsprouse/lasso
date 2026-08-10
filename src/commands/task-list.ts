@@ -28,14 +28,13 @@ export const taskList = defineQuery({
       description: "Stream open tasks as NDJSON, projecting two fields",
     },
   ],
-  handler: (input) =>
-    Effect.gen(function* () {
-      const reader = yield* StoreReader
-      const tasks = yield* reader.load
-      const items =
-        input.status === "all" ? tasks : tasks.filter((task) => task.status === input.status)
-      return { items, count: items.length }
-    }),
+  handler: Effect.fn("taskList.handler")(function* (input) {
+    const reader = yield* StoreReader
+    const tasks = yield* reader.load
+    const items =
+      input.status === "all" ? tasks : tasks.filter((task) => task.status === input.status)
+    return { items, count: items.length }
+  }),
   renderText: (data) =>
     data.items.length === 0
       ? "No tasks found."
@@ -44,10 +43,7 @@ export const taskList = defineQuery({
     fields: ["id", "title", "status", "createdAt"],
     // The encoded payload is the schema-encoded TaskList; rows come from it
     // so JSON, NDJSON, and projection always agree.
-    items: (encoded) =>
-      // oxlint-disable-next-line typescript/no-unsafe-type-assertion
-      (encoded as { items: ReadonlyArray<Record<string, unknown>> }).items.map((item) => ({
-        ...item,
-      })),
+    // oxlint-disable-next-line typescript/no-unsafe-type-assertion
+    items: (encoded) => (encoded as { items: ReadonlyArray<Record<string, unknown>> }).items,
   },
 })
