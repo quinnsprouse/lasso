@@ -21,7 +21,8 @@ const profiles = {
       "tsconfig.json",
       "--strict",
     ],
-    ["unit tests", "npx", "vitest", "run", "--reporter=dot"],
+    // e2e is deliberately excluded here: it depends on dist, which Push builds.
+    ["unit tests", "npx", "vitest", "run", "--reporter=dot", "test/unit", "test/contract"],
   ],
   push: [
     ["build", "npx", "tsdown"],

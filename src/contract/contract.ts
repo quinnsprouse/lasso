@@ -3,63 +3,125 @@ import type { AppError, ErrorCode } from "../errors.ts"
 
 /**
  * The CommandContract is the single source of truth for the CLI surface.
- * Everything else — the parser, help, `describe`, JSON Schema, docs, the
- * agent skill, MCP tools — is generated from or validated against it.
+ * Everything else — the parser, help, `describe`, JSON Schema, docs — is
+ * generated from or validated against its normalized form (see surface.ts).
  *
- * Mutations are structurally split into `plan` and `apply`: the runtime owns
- * `--dry-run`, the exit-4 confirmation protocol, and `--yes`. A command
- * cannot opt out of them, because the shape of the contract requires a plan.
+ * Mutations are structurally plan → confirm → apply: `plan` derives a
+ * self-contained execution plan (no side effects), `apply` receives ONLY the
+ * confirmed plan. Anything that changes what apply does must live in the
+ * plan, because the confirmation token binds the plan and nothing else.
  */
 
-type ParamType = "string" | "boolean" | "integer" | "choice" | "path"
-
-export interface ParamSpec {
-  readonly kind: "flag" | "argument"
-  readonly type: ParamType
+interface ParamBase {
   readonly description: string
-  /** Single-character alias, flags only. */
-  readonly alias?: string
-  /** Flags with a default are always present in the input. */
-  readonly default?: string | number | boolean
-  /** Choice values; required when type is "choice". */
-  readonly choices?: ReadonlyArray<string>
 }
+
+/**
+ * Arguments are positional and required; no alias, no default. The `never`
+ * fields make invalid combinations unrepresentable even under generic
+ * inference, where excess-property checks do not apply.
+ */
+type ArgumentSpec = ParamBase & {
+  readonly alias?: never
+  readonly default?: never
+} & (
+    | { readonly kind: "argument"; readonly type: "string"; readonly choices?: never }
+    | { readonly kind: "argument"; readonly type: "integer"; readonly choices?: never }
+    | { readonly kind: "argument"; readonly type: "path"; readonly choices?: never }
+    | {
+        readonly kind: "argument"
+        readonly type: "choice"
+        readonly choices: readonly [string, ...Array<string>]
+      }
+  )
+
+/** Boolean flags are presence flags — no default (absent means false). */
+type FlagSpec = ParamBase &
+  (
+    | {
+        readonly kind: "flag"
+        readonly type: "boolean"
+        readonly alias?: string
+        readonly default?: never
+        readonly choices?: never
+      }
+    | {
+        readonly kind: "flag"
+        readonly type: "string"
+        readonly alias?: string
+        readonly default?: string
+        readonly choices?: never
+      }
+    | {
+        readonly kind: "flag"
+        readonly type: "path"
+        readonly alias?: string
+        readonly default?: string
+        readonly choices?: never
+      }
+    | {
+        readonly kind: "flag"
+        readonly type: "integer"
+        readonly alias?: string
+        readonly default?: number
+        readonly choices?: never
+      }
+    | {
+        readonly kind: "flag"
+        readonly type: "choice"
+        readonly alias?: string
+        readonly choices: readonly [string, ...Array<string>]
+        readonly default?: string
+      }
+  )
+
+export type ParamSpec = ArgumentSpec | FlagSpec
 
 interface Example {
   readonly command: string
   readonly description: string
 }
 
-type ParamValue<S extends ParamSpec> = S["type"] extends "boolean"
+type ParamValue<S extends ParamSpec> = S extends { readonly type: "boolean" }
   ? boolean
-  : S["type"] extends "integer"
+  : S extends { readonly type: "integer" }
     ? number
-    : S["choices"] extends ReadonlyArray<infer C extends string>
+    : S extends { readonly choices: readonly (infer C extends string)[] }
       ? C
       : string
 
-type HasDefault<S extends ParamSpec> = S["default"] extends string | number | boolean ? true : false
-
 /** Arguments and defaulted/boolean flags are always present; other flags may be absent. */
 export type InputOf<P extends Record<string, ParamSpec>> = {
-  readonly [K in keyof P]: P[K]["kind"] extends "argument"
+  readonly [K in keyof P]: P[K] extends { readonly kind: "argument" }
     ? ParamValue<P[K]>
-    : HasDefault<P[K]> extends true
+    : P[K] extends { readonly default: string | number }
       ? ParamValue<P[K]>
-      : P[K]["type"] extends "boolean"
+      : P[K] extends { readonly type: "boolean" }
         ? boolean
         : ParamValue<P[K]> | undefined
 }
 
+type Idempotency =
+  | { readonly kind: "always" }
+  | { readonly kind: "conditional"; readonly parameter: string }
+  | { readonly kind: "none" }
+
 interface ContractBase<P extends Record<string, ParamSpec>> {
-  /** Space-separated command path, e.g. "task list". */
+  /** Space-separated command path, e.g. "task list". Two levels max. */
   readonly name: string
   readonly summary: string
   readonly stability: "stable" | "experimental"
   readonly params: P
-  /** Error codes this command can produce — surfaced in describe and docs. */
-  readonly errorCodes: ReadonlyArray<ErrorCode>
+  /** Domain error codes this command can produce. Framework codes are added automatically. */
+  readonly domainErrorCodes: ReadonlyArray<ErrorCode>
   readonly examples: ReadonlyArray<Example>
+}
+
+interface Collection {
+  /** The projectable field inventory — static, never derived from data. */
+  readonly fields: readonly [string, ...Array<string>]
+  /** Extracts rows from the ENCODED output, so JSON and NDJSON agree. */
+  readonly items: (encoded: unknown) => ReadonlyArray<Record<string, unknown>>
 }
 
 export interface QueryContract<
@@ -68,38 +130,45 @@ export interface QueryContract<
   R = never,
 > extends ContractBase<P> {
   readonly kind: "query"
-  readonly output: Schema.Codec<A, unknown>
+  readonly dataSchema: Schema.Codec<A, unknown>
   readonly handler: (input: InputOf<P>) => Effect.Effect<A, AppError, R>
   /** Human rendering for text mode; JSON pretty-print when omitted. */
-  readonly render?: (data: A) => string
-  /** Collection accessor: enables NDJSON item streaming and `--fields`. */
-  readonly items?: (data: A) => ReadonlyArray<Record<string, unknown>>
+  readonly renderText?: (data: A) => string
+  /** Declare for collection outputs: enables NDJSON item events and --fields. */
+  readonly collection?: Collection
 }
 
 export interface MutationContract<
   P extends Record<string, ParamSpec> = Record<string, ParamSpec>,
   Plan = unknown,
   A = unknown,
-  R = never,
+  RPlan = never,
+  RApply = never,
 > extends ContractBase<P> {
   readonly kind: "mutation"
-  readonly output: Schema.Codec<A, unknown>
+  readonly dataSchema: Schema.Codec<A, unknown>
   readonly planSchema: Schema.Codec<Plan, unknown>
-  readonly idempotent: boolean
-  /** Pure derivation of intent: validate input, read state, produce a plan. Never mutates. */
-  readonly plan: (input: InputOf<P>) => Effect.Effect<Plan, AppError, R>
-  /** Executes exactly the given plan. The runtime guarantees the plan was confirmed. */
-  readonly apply: (plan: Plan, input: InputOf<P>) => Effect.Effect<A, AppError, R>
-  readonly render?: (data: A) => string
-  readonly renderPlan?: (plan: Plan) => string
+  readonly idempotency: Idempotency
+  /**
+   * Pure derivation of intent: validate input, read state, produce a
+   * SELF-CONTAINED plan. Runs with read capabilities only.
+   */
+  readonly plan: (input: InputOf<P>) => Effect.Effect<Plan, AppError, RPlan>
+  /** Executes exactly the confirmed plan. Never sees the original input. */
+  readonly apply: (plan: Plan) => Effect.Effect<A, AppError, RApply>
+  readonly renderText?: (data: A) => string
+  readonly renderPlanText?: (plan: Plan) => string
 }
 
-export type AnyContract = QueryContract<any, any, any> | MutationContract<any, any, any, any>
+// biome-ignore format: readability
+export type AnyContract =
+  | QueryContract<any, any, any>
+  | MutationContract<any, any, any, any, any>
 
 export interface Capabilities {
   readonly mutates: boolean
   readonly supportsDryRun: boolean
-  readonly idempotent: boolean
+  readonly idempotency: Idempotency
   readonly interactive: boolean
   readonly mcpEligible: boolean
 }
@@ -109,14 +178,14 @@ export const capabilitiesOf = (contract: AnyContract): Capabilities =>
     ? {
         mutates: true,
         supportsDryRun: true,
-        idempotent: contract.idempotent,
+        idempotency: contract.idempotency,
         interactive: false,
         mcpEligible: true,
       }
     : {
         mutates: false,
         supportsDryRun: false,
-        idempotent: true,
+        idempotency: { kind: "always" },
         interactive: false,
         mcpEligible: true,
       }
@@ -125,6 +194,12 @@ export const defineQuery = <const P extends Record<string, ParamSpec>, A, R = ne
   contract: Omit<QueryContract<P, A, R>, "kind">,
 ): QueryContract<P, A, R> => ({ kind: "query", ...contract })
 
-export const defineMutation = <const P extends Record<string, ParamSpec>, Plan, A, R = never>(
-  contract: Omit<MutationContract<P, Plan, A, R>, "kind">,
-): MutationContract<P, Plan, A, R> => ({ kind: "mutation", ...contract })
+export const defineMutation = <
+  const P extends Record<string, ParamSpec>,
+  Plan,
+  A,
+  RPlan = never,
+  RApply = never,
+>(
+  contract: Omit<MutationContract<P, Plan, A, RPlan, RApply>, "kind">,
+): MutationContract<P, Plan, A, RPlan, RApply> => ({ kind: "mutation", ...contract })

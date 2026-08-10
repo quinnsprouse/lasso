@@ -32,26 +32,23 @@ writeFileSync(
   file,
   `import { Effect, Schema } from "effect"
 import { defineQuery } from "../contract/contract.ts"
-import { register } from "../contract/registry.ts"
 
-export const ${exportName} = register(
-  defineQuery({
-    name: "${commandName}",
-    summary: "Describe what ${commandName} returns",
-    stability: "experimental",
-    params: {},
-    output: Schema.Struct({ message: Schema.String }),
-    errorCodes: [],
-    examples: [
-      {
-        command: "lasso ${commandName} --json",
-        description: "Run ${commandName} and print the JSON envelope",
-      },
-    ],
-    handler: () => Effect.succeed({ message: "implement me" }),
-    render: (data) => data.message,
-  }),
-)
+export const ${exportName} = defineQuery({
+  name: "${commandName}",
+  summary: "Describe what ${commandName} returns",
+  stability: "experimental",
+  params: {},
+  dataSchema: Schema.Struct({ message: Schema.String }),
+  domainErrorCodes: [],
+  examples: [
+    {
+      command: "lasso ${commandName} --json",
+      description: "Run ${commandName} and print the JSON envelope",
+    },
+  ],
+  handler: () => Effect.succeed({ message: "implement me" }),
+  renderText: (data) => data.message,
+})
 `,
 )
 

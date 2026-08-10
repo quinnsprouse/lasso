@@ -55,7 +55,7 @@
       }
     },
     {
-      "files": ["src/contract/adapter.ts", "src/contract/jsonschema.ts"],
+      "files": ["src/contract/adapter.ts", "src/contract/jsonschema.ts", "src/contract/surface.ts"],
       "rules": {
         "typescript/no-unsafe-type-assertion": "off"
       }

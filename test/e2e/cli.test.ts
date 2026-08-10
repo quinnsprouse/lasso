@@ -46,9 +46,9 @@ describe("introspection", () => {
     const result = await run(["schema", "--json"])
     expect(result.exitCode).toBe(0)
     const envelope = parse(result.stdout)
-    expect(envelope.data.$schema).toContain("2020-12")
+    expect(envelope.data.dialect).toContain("2020-12")
     const create = envelope.data.commands.find((c: any) => c.name === "task create")
-    expect(create.plan).toBeDefined()
+    expect(create.plan.$schema).toContain("2020-12")
     expect(create.params.required).toContain("title")
   })
 

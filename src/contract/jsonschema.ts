@@ -1,53 +1,75 @@
 import { SchemaRepresentation } from "effect"
 import type { SchemaAST } from "effect"
-import type { AnyContract, ParamSpec } from "./contract.ts"
-import { capabilitiesOf } from "./contract.ts"
-import { kebabCase } from "./adapter.ts"
+import type { AnyContract } from "./contract.ts"
+import type { CommandSurface, SurfaceParam } from "./surface.ts"
+import { errorCatalogTable, surfaceOf } from "./surface.ts"
 import { ExitCode } from "../output/exit.ts"
 import { SCHEMA_VERSION } from "../output/envelope.ts"
 
 /**
- * Serializes the registry into machine-readable surfaces:
- * `describe` (command inventory) and `schema` (JSON Schema Draft 2020-12
- * for each command's parameters, output, and plan).
+ * Serializes the normalized command surfaces into the two introspection
+ * documents: `describe` (inventory) and `schema` (standalone JSON Schema,
+ * draft 2020-12, for params, outputs, and plans). Both derive from the same
+ * CommandSurface the parser is built from, so they cannot drift.
  */
 
-const paramJsonSchema = (spec: ParamSpec): Record<string, unknown> => {
-  switch (spec.type) {
-    case "boolean":
-      return { type: "boolean" }
-    case "integer":
-      return { type: "integer" }
-    case "choice":
-      return { type: "string", enum: [...(spec.choices ?? [])] }
-    case "path":
-    case "string":
-      return { type: "string" }
+const DIALECT = "https://json-schema.org/draft/2020-12/schema"
+
+const paramJsonSchema = (param: SurfaceParam): Record<string, unknown> => {
+  const base = (() => {
+    switch (param.type) {
+      case "boolean":
+        return { type: "boolean" }
+      case "integer":
+        return { type: "integer" }
+      case "choice":
+        return { type: "string", enum: [...(param.choices ?? [])] }
+      default:
+        return { type: "string" }
+    }
+  })()
+  return {
+    ...base,
+    description: param.description,
+    ...(param.default !== undefined ? { default: param.default } : {}),
   }
 }
 
-export const describeCommand = (contract: AnyContract) => ({
-  name: contract.name,
-  summary: contract.summary,
-  stability: contract.stability,
-  capabilities: capabilitiesOf(contract),
-  params: Object.fromEntries(
-    Object.entries(contract.params as Record<string, ParamSpec>).map(([key, spec]) => [
-      key,
-      {
-        kind: spec.kind,
-        type: spec.type,
-        description: spec.description,
-        ...(spec.kind === "flag" ? { cliName: `--${kebabCase(key)}` } : {}),
-        ...(spec.alias !== undefined ? { alias: spec.alias } : {}),
-        ...(spec.default !== undefined ? { default: spec.default } : {}),
-        ...(spec.choices !== undefined ? { choices: [...spec.choices] } : {}),
-        required: spec.kind === "argument",
-      },
-    ]),
-  ),
-  errorCodes: [...contract.errorCodes],
-  examples: [...contract.examples],
+/** A standalone draft 2020-12 document an agent can hand to any validator. */
+const standaloneSchema = (ast: SchemaAST.AST): Record<string, unknown> => {
+  const document = SchemaRepresentation.toJsonSchemaDocument(
+    SchemaRepresentation.toRepresentation(ast),
+  )
+  const defs = document.definitions as Record<string, unknown>
+  return {
+    $schema: DIALECT,
+    ...(document.schema as Record<string, unknown>),
+    ...(Object.keys(defs).length > 0 ? { $defs: defs } : {}),
+  }
+}
+
+const describeParam = (param: SurfaceParam) => ({
+  key: param.key,
+  cliName: param.cliName,
+  kind: param.kind,
+  type: param.type,
+  description: param.description,
+  required: param.required,
+  owner: param.owner,
+  ...(param.alias !== undefined ? { alias: param.alias } : {}),
+  ...(param.default !== undefined ? { default: param.default } : {}),
+  ...(param.choices !== undefined ? { choices: [...param.choices] } : {}),
+})
+
+const describeSurface = (surface: CommandSurface) => ({
+  name: surface.name,
+  summary: surface.contract.summary,
+  stability: surface.contract.stability,
+  capabilities: surface.capabilities,
+  params: surface.params.map(describeParam),
+  resultVariants: surface.resultVariants,
+  errorCodes: surface.errorCodes,
+  examples: [...surface.contract.examples],
 })
 
 export const describeCli = (options: {
@@ -59,12 +81,26 @@ export const describeCli = (options: {
   cli: { name: options.binName, version: options.version },
   protocol: {
     formats: ["json", "text", "ndjson"],
+    globalFlags: [
+      { cliName: "--json", description: "Output a JSON envelope" },
+      { cliName: "--format", description: "Output format: auto | json | text | ndjson" },
+      {
+        cliName: "--no-input",
+        description: "Never wait for input (this CLI never prompts; accepted for compatibility)",
+      },
+    ],
     envelope: {
       ok: { schemaVersion: "string", status: "ok", data: "…", warnings: ["…"] },
       error: {
         schemaVersion: "string",
         status: "error",
-        error: { code: "string", message: "string", fix: "string?", transient: "boolean" },
+        error: {
+          code: "string",
+          message: "string",
+          fix: "string?",
+          transient: "boolean",
+          details: "unknown?",
+        },
         warnings: ["…"],
       },
       confirmationRequired: {
@@ -75,32 +111,30 @@ export const describeCli = (options: {
         warnings: ["…"],
       },
     },
+    ndjsonEvents: ["item", "warning", "summary", "confirmation_required", "error"],
     exitCodes: ExitCode,
-    globalFlags: ["--json", "--format <auto|json|text|ndjson>", "--no-input"],
+    errorCatalog: errorCatalogTable(),
   },
-  commands: options.contracts.map(describeCommand),
+  commands: options.contracts.map((contract) => describeSurface(surfaceOf(contract))),
 })
 
-const toJsonSchema = (schema: { readonly ast: SchemaAST.AST }): unknown =>
-  SchemaRepresentation.toJsonSchemaDocument(SchemaRepresentation.toRepresentation(schema.ast))
-
-export const commandSchemas = (contract: AnyContract) => ({
-  name: contract.name,
-  params: {
-    type: "object",
-    properties: Object.fromEntries(
-      Object.entries(contract.params as Record<string, ParamSpec>).map(([key, spec]) => [
-        key,
-        paramJsonSchema(spec),
-      ]),
-    ),
-    required: Object.entries(contract.params as Record<string, ParamSpec>)
-      .filter(([, spec]) => spec.kind === "argument")
-      .map(([key]) => key),
-  },
-  output: toJsonSchema(contract.output),
-  ...(contract.kind === "mutation" ? { plan: toJsonSchema(contract.planSchema) } : {}),
-})
+export const commandSchemas = (contract: AnyContract) => {
+  const surface = surfaceOf(contract)
+  return {
+    name: surface.name,
+    params: {
+      $schema: DIALECT,
+      type: "object",
+      properties: Object.fromEntries(
+        surface.params.map((param) => [param.key, paramJsonSchema(param)]),
+      ),
+      required: surface.params.filter((param) => param.required).map((param) => param.key),
+      additionalProperties: false,
+    },
+    output: standaloneSchema(contract.dataSchema.ast),
+    ...(contract.kind === "mutation" ? { plan: standaloneSchema(contract.planSchema.ast) } : {}),
+  }
+}
 
 export const schemaDocument = (options: {
   readonly binName: string
@@ -108,7 +142,7 @@ export const schemaDocument = (options: {
   readonly contracts: ReadonlyArray<AnyContract>
 }) => ({
   schemaVersion: SCHEMA_VERSION,
-  $schema: "https://json-schema.org/draft/2020-12/schema",
+  dialect: DIALECT,
   cli: { name: options.binName, version: options.version },
   commands: options.contracts.map(commandSchemas),
 })

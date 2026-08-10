@@ -1,14 +1,33 @@
 import { Schema } from "effect"
-import { ExitCode } from "./output/exit.ts"
+import type { ExitCode } from "./output/exit.ts"
+import { ExitCode as Exit } from "./output/exit.ts"
 
 /**
- * Every expected failure in a command handler must be (or extend) `AppError`.
- * The handler type enforces this: an `Effect` whose error channel is not
- * `AppError` will not typecheck as a contract handler.
- *
- * `code` is the stable machine-readable identifier agents branch on.
- * `fix` is an exact recovery command or action, not prose.
- * `transient` tells an agent whether retrying is meaningful.
+ * The error catalog: one table owns every error code, its exit code, and its
+ * transience. Constructors, the ErrorCode type, describe output, and the
+ * envelope all derive from it — adding a code here is the only way to add one.
+ */
+export const ERROR_CATALOG = {
+  invalid_usage: { exit: Exit.usage, transient: false },
+  invalid_data: { exit: Exit.invalidData, transient: false },
+  not_found: { exit: Exit.invalidData, transient: false },
+  resource_conflict: { exit: Exit.cannotWrite, transient: false },
+  cannot_write: { exit: Exit.cannotWrite, transient: false },
+  service_unavailable: { exit: Exit.serviceUnavailable, transient: true },
+  transient_failure: { exit: Exit.transient, transient: true },
+  auth_failure: { exit: Exit.auth, transient: false },
+  invalid_config: { exit: Exit.config, transient: false },
+  stale_confirmation: { exit: Exit.usage, transient: false },
+  internal_error: { exit: Exit.internalDefect, transient: false },
+} as const satisfies Record<string, { exit: ExitCode; transient: boolean }>
+
+export type ErrorCode = keyof typeof ERROR_CATALOG
+
+/**
+ * Every expected failure in a command handler is an `AppError`, built through
+ * `Errors.*` so code, exit, and transience always agree with the catalog.
+ * `fix` is an exact recovery command or action, not prose. `transient` tells
+ * an agent whether retrying is meaningful.
  */
 export class AppError extends Schema.TaggedError<AppError>()("AppError", {
   code: Schema.String,
@@ -26,40 +45,26 @@ interface ErrorInit {
 }
 
 const make =
-  (code: string, exit: ExitCode, transient: boolean) =>
+  (code: ErrorCode) =>
   (init: ErrorInit): AppError =>
     new AppError({
       code,
-      exit,
-      transient,
+      exit: ERROR_CATALOG[code].exit,
+      transient: ERROR_CATALOG[code].transient,
       message: init.message,
       ...(init.fix !== undefined ? { fix: init.fix } : {}),
       ...(init.details !== undefined ? { details: init.details } : {}),
     })
 
-/** Constructors for the error taxonomy. Add codes here, never inline. */
 export const Errors = {
-  usage: make("invalid_usage", ExitCode.usage, false),
-  invalidData: make("invalid_data", ExitCode.invalidData, false),
-  notFound: make("not_found", ExitCode.invalidData, false),
-  conflict: make("resource_conflict", ExitCode.cannotWrite, false),
-  cannotWrite: make("cannot_write", ExitCode.cannotWrite, false),
-  serviceUnavailable: make("service_unavailable", ExitCode.serviceUnavailable, true),
-  transient: make("transient_failure", ExitCode.transient, true),
-  auth: make("auth_failure", ExitCode.auth, false),
-  config: make("invalid_config", ExitCode.config, false),
-  staleConfirmation: make("stale_confirmation", ExitCode.usage, false),
+  usage: make("invalid_usage"),
+  invalidData: make("invalid_data"),
+  notFound: make("not_found"),
+  conflict: make("resource_conflict"),
+  cannotWrite: make("cannot_write"),
+  serviceUnavailable: make("service_unavailable"),
+  transient: make("transient_failure"),
+  auth: make("auth_failure"),
+  config: make("invalid_config"),
+  staleConfirmation: make("stale_confirmation"),
 } as const
-
-export type ErrorCode =
-  | "invalid_usage"
-  | "invalid_data"
-  | "not_found"
-  | "resource_conflict"
-  | "cannot_write"
-  | "service_unavailable"
-  | "transient_failure"
-  | "auth_failure"
-  | "invalid_config"
-  | "stale_confirmation"
-  | "internal_error"

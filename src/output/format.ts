@@ -14,6 +14,8 @@ export interface OutputMode {
   readonly color: boolean
   /** argv with the global output flags removed, ready for command parsing. */
   readonly argv: ReadonlyArray<string>
+  /** True when `--help`/`-h` appeared before any `--` terminator. */
+  readonly helpRequested: boolean
 }
 
 const FORMAT_VALUES: ReadonlyArray<OutputFormat> = ["auto", "json", "text", "ndjson"]
@@ -32,24 +34,38 @@ export interface NegotiateOptions {
  * Precedence: explicit flag > env (`LASSO_FORMAT`) > auto-detection.
  * Auto selects JSON when stdout is not a terminal — the agent that forgot
  * `--json` still gets machine-readable output.
+ *
+ * Everything after a `--` terminator is left untouched for the parser:
+ * `mycli task create -- --json` treats `--json` as a positional value.
+ * Conflicting explicit formats are a usage error, never silently resolved.
  */
 export const negotiate = (options: NegotiateOptions): OutputMode => {
   const rest: Array<string> = []
-  let format: OutputFormat | undefined
+  const explicit: Array<OutputFormat> = []
   let noInput = false
+  let helpRequested = false
   let error: string | undefined
 
   const argv = options.argv
+  let terminated = false
   for (let i = 0; i < argv.length; i++) {
     const arg = argv[i]!
-    if (arg === "--json") {
-      format = "json"
+    if (terminated) {
+      rest.push(arg)
+    } else if (arg === "--") {
+      terminated = true
+      rest.push(arg)
+    } else if (arg === "--json") {
+      explicit.push("json")
     } else if (arg === "--no-input") {
       noInput = true
+    } else if (arg === "--help" || arg === "-h") {
+      helpRequested = true
+      rest.push(arg)
     } else if (arg === "--format") {
       const value = argv[i + 1]
       if (value !== undefined && isFormat(value)) {
-        format = value
+        explicit.push(value)
         i++
       } else {
         error = value === undefined ? "missing value for --format" : `invalid format "${value}"`
@@ -57,7 +73,7 @@ export const negotiate = (options: NegotiateOptions): OutputMode => {
     } else if (arg.startsWith("--format=")) {
       const value = arg.slice("--format=".length)
       if (isFormat(value)) {
-        format = value
+        explicit.push(value)
       } else {
         error = `invalid format "${value}"`
       }
@@ -66,9 +82,19 @@ export const negotiate = (options: NegotiateOptions): OutputMode => {
     }
   }
 
+  const distinct = [...new Set(explicit)]
+  let format = distinct[0]
+  if (error === undefined && distinct.length > 1) {
+    error = `conflicting output formats: ${distinct.join(", ")}`
+  }
+
   const envFormat = options.env["LASSO_FORMAT"]
-  if (format === undefined && envFormat !== undefined && isFormat(envFormat)) {
-    format = envFormat
+  if (format === undefined && envFormat !== undefined) {
+    if (isFormat(envFormat)) {
+      format = envFormat
+    } else if (error === undefined) {
+      error = `invalid LASSO_FORMAT value "${envFormat}"`
+    }
   }
 
   const resolved: "json" | "text" | "ndjson" =
@@ -86,6 +112,7 @@ export const negotiate = (options: NegotiateOptions): OutputMode => {
     noInput: noInput || !options.stdinIsTTY || options.env["CI"] !== undefined,
     color,
     argv: rest,
+    helpRequested,
   }
 
   if (error !== undefined) {

@@ -46,17 +46,23 @@ export type OkEnvelope = typeof OkEnvelope.Type
 export type ErrorEnvelope = typeof ErrorEnvelope.Type
 export type ConfirmationEnvelope = typeof ConfirmationEnvelope.Type
 
-/** NDJSON stream events. Every stream ends with `summary` or `error`. */
+/**
+ * NDJSON stream events. Every stream ends with exactly one terminal event:
+ * `summary`, `confirmation_required`, or `error`.
+ */
 export const StreamEvent = Schema.Union([
   Schema.Struct({ event: Schema.Literal("item"), data: Schema.Unknown }),
   Schema.Struct({ event: Schema.Literal("warning"), message: Schema.String }),
-  Schema.Struct({
-    event: Schema.Literal("progress"),
-    message: Schema.String,
-    completed: Schema.optional(Schema.Int),
-    total: Schema.optional(Schema.Int),
-  }),
   Schema.Struct({ event: Schema.Literal("summary"), data: Schema.Unknown }),
+  Schema.Struct({
+    event: Schema.Literal("confirmation_required"),
+    plan: Schema.Unknown,
+    confirmation: Schema.Struct({
+      token: Schema.String,
+      confirmArgs: Schema.Array(Schema.String),
+      confirmCommand: Schema.String,
+    }),
+  }),
   Schema.Struct({ event: Schema.Literal("error"), error: ErrorBody }),
 ])
 

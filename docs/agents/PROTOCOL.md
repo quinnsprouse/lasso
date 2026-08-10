@@ -1,6 +1,6 @@
 # Output protocol
 
-The machine surface is the default surface. stdout carries data; stderr carries diagnostics; the two never mix. Format negotiation happens before parsing: explicit `--format`/`--json` > `LASSO_FORMAT` env > auto (JSON when stdout is not a TTY, text on a terminal). `NO_COLOR`, `TERM=dumb`, and `CI` disable color; non-TTY stdin or `--no-input` means no prompt may ever block.
+The machine surface is the default surface. stdout carries data; stderr carries diagnostics; the two never mix. Format negotiation happens before parsing: explicit `--format`/`--json` > `LASSO_FORMAT` env > auto (JSON when stdout is not a TTY, text on a terminal). Everything after a `--` terminator is left for the parser; conflicting explicit formats and invalid `LASSO_FORMAT` values are usage errors, never silently resolved. `NO_COLOR`, `TERM=dumb`, and `CI` disable color; non-TTY stdin or `--no-input` means no prompt may ever block.
 
 ## Envelopes (json format)
 
@@ -26,12 +26,12 @@ The one distinction to branch on hardest: 75 and `"transient": true` mean retry;
 
 ## NDJSON (`--format ndjson`)
 
-One event object per line: `item`, `warning`, `progress`, `summary`, `error`. Every stream ends with `summary` or `error`. Collections stream items individually; `--fields id,title` projects item fields (unknown fields fail with the available set in `fix`).
+One event object per line: `item`, `warning`, `summary`, `confirmation_required`, `error`. Every stream ends with exactly one terminal event (`summary`, `confirmation_required`, or `error`). Collections stream items individually; `--fields id,title` projects item fields against the command's static field inventory — unknown fields fail identically on empty and populated collections, with the available set in `fix`. Projection requires a machine format.
 
 ## Mutation flow
 
 1. `mycli thing create X --json` → exit 4, plan + token envelope. Nothing changed.
-2. Replay `confirmArgs` (same command + `--confirm <token>`) → applies exactly the previewed plan.
+2. Replay `confirmArgs` (same command + `--confirm <token>` + the machine format flag) → applies exactly the previewed plan. The token binds `{command, schemaVersion, plan}`.
 3. Stale token (state changed since the preview) → `stale_confirmation`, exit 64. Re-plan.
 4. One-shot: `--yes`. Preview only: `--dry-run` (never changes anything).
 
