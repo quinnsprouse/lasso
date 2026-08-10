@@ -83,6 +83,14 @@ step("git tooling: hooks install and commit messages are enforced", () => {
   }
 })
 
+step("doctor: a fresh workspace reports healthy", () => {
+  const output = sh("node scripts/doctor.mjs --json")
+  const report = JSON.parse(output)
+  if (report.status !== "ok") {
+    throw new Error(`doctor found problems: ${JSON.stringify(report.checks.filter((c) => !c.ok))}`)
+  }
+})
+
 step("build: the template produces the shipped artifact", () => {
   sh("npx tsdown")
 })

@@ -46,6 +46,8 @@ npm run build                                # build dist/bin.cjs
 npm run test:contract                        # test a fresh archive of the starter
 node scripts/new-command.mjs <group> <name>  # scaffold and register a command
 npm run setup                                # install Git hooks
+npm run doctor                               # check the workspace, incl. patch state
+npm run release:prepare -- patch             # bump every version source together
 ```
 
 Agents start with [AGENTS.md](AGENTS.md). [CONTEXT.md](CONTEXT.md) defines project terms, and [`docs/agents/`](docs/agents/) contains deeper references.

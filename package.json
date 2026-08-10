@@ -35,7 +35,9 @@
     "test:e2e": "vitest run test/e2e",
     "prepack": "TSDOWN_SKIP_PUBLINT=1 tsdown --logLevel silent",
     "setup:skills": "npx skills experimental_install",
-    "prepare": "effect-tsgo patch --oxlint"
+    "prepare": "effect-tsgo patch --oxlint",
+    "doctor": "node scripts/doctor.mjs",
+    "release:prepare": "node scripts/release.mjs"
   },
   "devDependencies": {
     "@biomejs/biome": "2.5.7",
