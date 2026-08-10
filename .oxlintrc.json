@@ -102,7 +102,7 @@
       }
     },
     {
-      "files": ["scripts/**", "test/**", ".claude/**"],
+      "files": ["scripts/**", "test/**", ".claude/**", "*.config.ts"],
       "rules": {
         "no-console": "off",
         "no-restricted-imports": "off",

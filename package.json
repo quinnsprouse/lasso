@@ -33,7 +33,7 @@
     "knip": "knip",
     "setup": "lefthook install",
     "test:e2e": "vitest run test/e2e",
-    "prepack": "tsdown --logLevel silent"
+    "prepack": "TSDOWN_SKIP_PUBLINT=1 tsdown --logLevel silent"
   },
   "devDependencies": {
     "@biomejs/biome": "2.5.7",
