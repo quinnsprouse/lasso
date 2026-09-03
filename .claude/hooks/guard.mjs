@@ -4,13 +4,11 @@
 // stderr blocks the tool call; the agent sees the reason and can choose a
 // compliant path. Everything not listed here is allowed.
 //
-// Commands are tokenized (quotes respected; newlines, `;`, `|`, `&`, `(`,
-// `$(…)`, and backticks split segments; `sh -c`/`eval` bodies re-tokenized;
-// env/sudo/xargs wrappers and VAR=value prefixes stripped; git global options
-// and option values parsed) and judged by argv, not by substring matching, so
-// a commit message that mentions `--no-verify` passes and
-// `git -c core.hooksPath=/dev/null commit` does not.
-// This is a speed bump for an agent, not a security boundary.
+// Commands are split into argv segments and judged by argv, not by substring
+// matching, so a commit message that mentions `--no-verify` passes and
+// `git -c core.hooksPath=/dev/null commit` does not. The splitter is a
+// sketch of the shell, not a shell: it exists to catch an agent's honest
+// command, and the git hooks and CI remain the real gates.
 import { existsSync, lstatSync, readFileSync, readlinkSync, realpathSync } from "node:fs"
 import { basename, dirname, join, relative, resolve } from "node:path"
 
@@ -34,506 +32,205 @@ const deny = (reason, fix) => {
 
 // ---------------------------------------------------------------- tokenizer
 
-/** The separator that ended each top-level segment (by index), for pipeline-aware rules. */
-const joiners = new WeakMap()
-/** Command-substitution bodies found inside a tokenization; judged as commands of their own. */
-const nestedBodies = new WeakMap()
-
-/** Splits a shell command into segments of tokens. Quotes group; newline ; | & ( ) $( and ` split. */
-/**
- * Parses the operator after a `<<` at `from` (`-`, spaces, then the delimiter,
- * which may be quoted or escaped — then the body is literal). Returns the
- * document and the index just past the delimiter.
- */
-const parseHeredoc = (text, from) => {
-  let j = from
-  const strip = text[j] === "-"
-  if (strip) {
-    j += 1
-  }
-  while (j < text.length && (text[j] === " " || text[j] === "\t")) {
-    j += 1
-  }
-  let delimiter = ""
-  let quoted = false
-  let inner = null
-  for (; j < text.length; j++) {
-    const d = text[j]
-    if (inner !== null) {
-      if (d === inner) {
-        inner = null
-      } else {
-        delimiter += d
-      }
-    } else if (d === "'" || d === '"') {
-      inner = d
-      quoted = true
-    } else if (d === "\\" && text[j + 1] === "\n") {
-      j += 1
-    } else if (d === "\\" && j + 1 < text.length) {
-      delimiter += text[++j]
-      quoted = true
-    } else if (/[\s;|&<>()]/.test(d)) {
-      break
-    } else {
-      delimiter += d
-    }
-  }
-  return { delimiter, quoted, strip, end: j }
-}
-
-/** Reads the pending heredoc bodies starting at `from`; returns the bodies and the index after them. */
-const readHeredocBodies = (text, from, pending) => {
-  let j = from
-  const bodies = []
-  for (const doc of pending) {
-    const lines = []
-    while (j < text.length) {
-      const eol = text.indexOf("\n", j)
-      const line = text.slice(j, eol === -1 ? text.length : eol)
-      j = eol === -1 ? text.length : eol + 1
-      if ((doc.strip ? line.replace(/^\t+/, "") : line) === doc.delimiter) {
-        break
-      }
-      lines.push(line)
-    }
-    if (!doc.quoted) {
-      bodies.push(lines.join("\n"))
-    }
-  }
-  return { bodies, end: j }
-}
-
-/**
- * Index just past the `)` that closes a `$(` opened before `from`. The body is a
- * fresh shell context: quotes and escapes inside it are tracked, nested
- * parens counted. An unbalanced body runs to the end of the text.
- */
-const substitutionEnd = (text, from) => {
+/** Index just past the `)` closing a `$(` whose body starts at `from`; quotes inside count for nothing. */
+const closeOf = (text, from) => {
   let depth = 1
   let quote = null
-  // `case … in pattern) …;; esac`: a pattern's `)` closes nothing. Only the
-  // keywords count — `case` or `esac` in command position, not as arguments.
-  let cases = 0
-  let word = ""
-  let commandPosition = true
-  let wordStart = true
-  const endWord = () => {
-    if (word.length > 0) {
-      if (commandPosition && word === "case") {
-        cases += 1
-      } else if (commandPosition && word === "esac" && cases > 0) {
-        cases -= 1
-      }
-      commandPosition = false
-    }
-    word = ""
-  }
-  const pending = []
   for (let j = from; j < text.length; j++) {
     const c = text[j]
     if (quote !== null) {
       if (c === quote) {
         quote = null
-      } else if (c === "\\" && quote === '"') {
+      } else if (c === "\\") {
         j += 1
       }
-      wordStart = false
-      continue
-    }
-    if (c === "\\" && text[j + 1] === "\n") {
-      j += 1
-      continue
-    }
-    if (c === "<" && text[j + 1] === "<" && text[j + 2] !== "<") {
-      endWord()
-      const doc = parseHeredoc(text, j + 2)
-      pending.push(doc)
-      j = doc.end - 1
-      wordStart = true
-      continue
-    }
-    if (c === "\n" && pending.length > 0) {
-      endWord()
-      j = readHeredocBodies(text, j + 1, pending).end - 1
-      pending.length = 0
-      commandPosition = true
-      wordStart = true
-      continue
-    }
-    if (/[A-Za-z]/.test(c)) {
-      word += c
-      wordStart = false
-      continue
-    }
-    endWord()
-    if (c === "#" && wordStart) {
-      // A comment inside the body runs to the end of its line.
-      while (j + 1 < text.length && text[j + 1] !== "\n") {
-        j += 1
-      }
-      continue
-    }
-    wordStart = /\s/.test(c) || ";|&(".includes(c)
-    if (c === "\n") {
-      commandPosition = true
-      continue
-    }
-    if (/\s/.test(c)) {
-      continue
-    }
-    if (";|&".includes(c)) {
-      commandPosition = true
     } else if (c === "\\") {
       j += 1
-      commandPosition = false
     } else if (c === "'" || c === '"') {
       quote = c
-      commandPosition = false
     } else if (c === "(") {
       depth += 1
-      commandPosition = true
-    } else if (c === ")") {
-      if (cases > 0 && depth === 1) {
-        commandPosition = true
-        continue
-      }
-      depth -= 1
-      if (depth === 0) {
-        return j + 1
-      }
-      commandPosition = true
-    } else {
-      commandPosition = false
-    }
-  }
-  return text.length
-}
-
-/** Index just past the backtick that closes one opened before `from`. */
-const backtickEnd = (text, from) => {
-  for (let j = from; j < text.length; j++) {
-    if (text[j] === "\\") {
-      j += 1
-    } else if (text[j] === "`") {
+    } else if (c === ")" && (depth -= 1) === 0) {
       return j + 1
     }
   }
   return text.length
 }
 
-/** Masks a backslash-escaped `$` or backtick so it cannot open a substitution. */
-const maskEscapes = (text) => {
-  let out = ""
-  for (let i = 0; i < text.length; i++) {
-    if (text[i] === "\\" && i + 1 < text.length) {
-      const next = text[++i]
-      if (next !== "\n") {
-        out += next === "$" || next === "`" ? "\u0000" : `\\${next}`
-      }
-    } else {
-      out += text[i]
-    }
-  }
-  return out
-}
-
-/** Every `$(…)` and backtick body in one word — a word can carry several. */
-const substitutionBodies = (word) => {
-  const bodies = []
-  for (let i = 0; i < word.length; i++) {
-    if (word[i] === "$" && word[i + 1] === "(") {
-      const end = substitutionEnd(word, i + 2)
-      bodies.push(word.slice(i + 2, word[end - 1] === ")" ? end - 1 : end))
-      i = end - 1
-    } else if (word[i] === "\\") {
-      i += 1
-    } else if (word[i] === "`") {
-      const end = backtickEnd(word, i + 1)
-      bodies.push(word.slice(i + 1, word[end - 1] === "`" ? end - 1 : end))
-      i = end - 1
-    }
-  }
-  return bodies
-}
-
+/**
+ * Splits a command into argv segments. Quotes group; newline `;` `|` `&`
+ * `(` `)` split; `#` comments and backslash-newlines vanish. A `$(…)` or
+ * backtick body and an unquoted heredoc body are returned as `bodies`:
+ * commands of their own, judged recursively. A quoted heredoc (`<<'EOF'`)
+ * is literal and skipped, so writing a file never trips a rule.
+ */
 const tokenize = (command) => {
   const segments = []
-  const ended = []
+  const joins = []
+  const bodies = []
+  const heredocs = []
   let current = []
   let token = ""
-  // The token as seen for substitution scanning: a quoted or escaped `$`
-  // or backtick is literal text and cannot open `$(…)`, so it is masked.
-  let scan = ""
-  let hasToken = false
+  let has = false
   let quote = null
-  const scans = []
-  let currentScans = []
-  const SUBSTITUTION = new Set(["$", "`"])
   const endToken = () => {
-    if (hasToken) {
+    if (has) {
       current.push(token)
-      currentScans.push(scan)
     }
     token = ""
-    scan = ""
-    hasToken = false
+    has = false
   }
   const endSegment = (by = "") => {
     endToken()
     if (current.length > 0) {
       segments.push(current)
-      scans.push(currentScans)
-      ended.push(by)
+      joins.push(by)
     }
     current = []
-    currentScans = []
-  }
-  // Heredocs: `<<'EOF'` bodies are literal and skipped; `<<EOF` bodies expand,
-  // so their substitutions are judged. Bodies start after the next newline.
-  const pending = []
-  const heredocBodies = []
-  const readHeredocs = (from) => {
-    const read = readHeredocBodies(command, from, pending)
-    heredocBodies.push(...read.bodies)
-    pending.length = 0
-    return read.end
   }
   for (let i = 0; i < command.length; i++) {
     const c = command[i]
-    // A backslash-newline is a line continuation: the shell deletes both.
     if (quote !== "'" && c === "\\" && command[i + 1] === "\n") {
       i += 1
-      continue
-    }
-    if (quote === null && c === "<" && command[i + 1] === "<" && command[i + 2] !== "<") {
-      endToken()
-      const doc = parseHeredoc(command, i + 2)
-      pending.push(doc)
-      i = doc.end - 1
-      continue
-    }
-    if (quote === null && c === "\n" && pending.length > 0) {
-      endSegment(c)
-      i = readHeredocs(i + 1) - 1
-      continue
-    }
-    // A substitution is one unit of the word it sits in, quoted or not: its
-    // body has its own quoting, so it is consumed whole and judged later.
-    if (quote !== "'" && ((c === "$" && command[i + 1] === "(") || c === "`")) {
-      const end = c === "`" ? backtickEnd(command, i + 1) : substitutionEnd(command, i + 2)
-      const text = command.slice(i, end)
-      token += text
-      scan += text
-      hasToken = true
+    } else if (quote !== "'" && c === "$" && command[i + 1] === "(") {
+      const end = closeOf(command, i + 2)
+      bodies.push(command.slice(i + 2, command[end - 1] === ")" ? end - 1 : end))
+      token += command.slice(i, end)
+      has = true
       i = end - 1
-      continue
-    }
-    if (quote !== null) {
+    } else if (quote !== "'" && c === "`") {
+      const end = command.indexOf("`", i + 1)
+      const stop = end === -1 ? command.length : end
+      bodies.push(command.slice(i + 1, stop))
+      token += command.slice(i, stop + 1)
+      has = true
+      i = stop
+    } else if (quote !== null) {
       if (c === quote) {
         quote = null
       } else if (c === "\\" && quote === '"' && i + 1 < command.length) {
-        // In double quotes a backslash escapes only $ ` " \ and newline;
-        // before any other character the shell keeps both.
-        const escaped = command[++i]
-        if (SUBSTITUTION.has(escaped) || escaped === '"' || escaped === "\\" || escaped === "\n") {
-          token += escaped
-          scan += SUBSTITUTION.has(escaped) ? "\u0000" : escaped
-        } else {
-          token += `\\${escaped}`
-          scan += `\\${escaped}`
-        }
+        token += command[++i]
       } else {
         token += c
-        scan += quote === "'" && SUBSTITUTION.has(c) ? "\u0000" : c
       }
-      continue
-    }
-    if (c === '"' || c === "'") {
+    } else if (c === '"' || c === "'") {
       quote = c
-      hasToken = true
-      continue
-    }
-    if (c === "#" && !hasToken) {
-      // A comment runs to the end of the line; the shell never runs it.
+      has = true
+    } else if (c === "\\" && i + 1 < command.length) {
+      token += command[++i]
+      has = true
+    } else if (c === "#" && !has) {
       while (i + 1 < command.length && command[i + 1] !== "\n") {
         i += 1
       }
-      continue
-    }
-    if (c === "\\" && i + 1 < command.length) {
-      const escaped = command[++i]
-      token += escaped
-      scan += SUBSTITUTION.has(escaped) ? "\u0000" : escaped
-      hasToken = true
-      continue
-    }
-    if (c === "|" && command[i + 1] === "|") {
+    } else if (c === "<" && command[i + 1] === "<" && command[i + 2] !== "<") {
+      endToken()
+      let j = i + 2
+      const strip = command[j] === "-"
+      j += strip ? 1 : 0
+      while (command[j] === " " || command[j] === "\t") {
+        j += 1
+      }
+      const open = command[j]
+      const quoted = open === "'" || open === '"' || open === "\\"
+      let delimiter = ""
+      if (open === "'" || open === '"') {
+        const close = command.indexOf(open, j + 1)
+        delimiter = command.slice(j + 1, close === -1 ? command.length : close)
+        j = close === -1 ? command.length : close + 1
+      } else {
+        j += open === "\\" ? 1 : 0
+        while (j < command.length && !/[\s;|&<>()]/.test(command[j])) {
+          delimiter += command[j++]
+        }
+      }
+      heredocs.push({ delimiter, quoted, strip })
+      i = j - 1
+    } else if (c === "\n" && heredocs.length > 0) {
+      endSegment(c)
+      let j = i + 1
+      for (const doc of heredocs) {
+        const lines = []
+        while (j < command.length) {
+          const eol = command.indexOf("\n", j)
+          const line = command.slice(j, eol === -1 ? command.length : eol)
+          j = eol === -1 ? command.length : eol + 1
+          if ((doc.strip ? line.replace(/^\t+/, "") : line) === doc.delimiter) {
+            break
+          }
+          lines.push(line)
+        }
+        if (!doc.quoted) {
+          bodies.push(lines.join("\n"))
+        }
+      }
+      heredocs.length = 0
+      i = j - 1
+    } else if (c === "|" && command[i + 1] === "|") {
       endSegment("||")
       i += 1
-      continue
-    }
-    if (c === "\n" || ";|&()".includes(c)) {
+    } else if (c === "\n" || ";|&()".includes(c)) {
       endSegment(c)
-      continue
-    }
-    if (/\s/.test(c)) {
+    } else if (/\s/.test(c)) {
       endToken()
-      continue
+    } else {
+      token += c
+      has = true
     }
-    token += c
-    scan += c
-    hasToken = true
   }
   endSegment()
-  if (pending.length > 0) {
-    readHeredocs(command.length)
-  }
-  joiners.set(segments, ended)
-  // A word can carry substitutions ("$(…)" or backticks), and so can an
-  // unquoted heredoc body: every body is a command judged on its own.
-  const bodies = []
-  for (const words of scans) {
-    for (const word of words) {
-      bodies.push(...substitutionBodies(word))
-    }
-  }
-  for (const body of heredocBodies) {
-    bodies.push(...substitutionBodies(maskEscapes(body)))
-  }
-  nestedBodies.set(segments, bodies)
-  return segments
+  return { segments, joins, bodies }
 }
-
-/** True when segment `index` was followed by a pipe (not `;`, `&&`, or a newline). */
-const pipedInto = (segments, index) => (joiners.get(segments) ?? [])[index] === "|"
 
 const WRAPPERS = new Set("env sudo command exec time nice nohup builtin xargs corepack".split(" "))
 const SHELLS = new Set(["sh", "bash", "zsh", "dash", "ksh"])
-/** Per wrapper, the options that consume the next token (xargs -I {}, sudo -u name, env -u NAME). */
+/** Wrapper options that take the next token as their value (`sudo -u root`, `xargs -I {}`). */
 const WRAPPER_VALUED = {
-  sudo: new Set(
-    "-u -g -h -p -C -r -U -D -T -a -R -c --user --group --host --prompt --close-from --role --other-user --chdir --command-timeout --type --chroot --login-class --auth-type".split(
-      " ",
-    ),
-  ),
-  env: new Set("-u -S -C -P --unset --split-string --chdir".split(" ")),
-  xargs: new Set(
-    "-I -J -n -P -L -d -s -E -a --replace --max-args --max-procs --max-lines --delimiter --max-chars --eof --arg-file".split(
-      " ",
-    ),
-  ),
-  nice: new Set("-n --adjustment".split(" ")),
-  time: new Set("-f -o --format --output".split(" ")),
-  exec: new Set(["-a"]),
+  sudo: new Set("-u -g -p -h -C --user --group --prompt".split(" ")),
+  env: new Set("-u -C --unset --chdir".split(" ")),
+  xargs: new Set("-I -n -P -L -d -s -E".split(" ")),
+  nice: new Set(["-n"]),
+  time: new Set("-f -o".split(" ")),
 }
-/** `sudo -nu root`, `xargs -0n 1`: in a cluster, the last letter may take the value. */
-const takesValue = (wrapper, option) => {
-  const valued = WRAPPER_VALUED[wrapper]
-  if (valued === undefined) {
-    return false
-  }
-  if (option.startsWith("--") || option.length <= 2) {
-    return valued.has(option)
-  }
-  // `-R/tmp`: a valued first letter carries its value inline; nothing follows.
-  if (valued.has(`-${option[1]}`)) {
-    return false
-  }
-  return valued.has(`-${option.at(-1)}`)
-}
-/** Shell keywords that may precede the command word in a compound command. */
+/** Keywords that may precede the command word in a compound command. */
 const KEYWORDS = new Set("if then else elif while until do ! {".split(" "))
 /** Package-manager global options that may precede exec/x/dlx. */
 const PM_VALUED = new Set("-C --prefix --registry --loglevel --filter -F -w --workspace".split(" "))
 
-/** Index of the command word after any VAR=value prefixes and wrappers (with their options). */
-const afterPrefixes = (tokens) => {
+/**
+ * One segment to its judged form: `VAR=value` prefixes become `<assign>`
+ * pseudo-segments (the LEFTHOOK rule reads them), keywords and wrappers with
+ * their options are dropped, and `export` is an assignment too.
+ */
+const normalize = (tokens) => {
+  const out = []
   let i = 0
   while (i < tokens.length) {
-    if (tokens[i] === "function") {
-      i += 2
-    } else if (KEYWORDS.has(tokens[i]) || /^[A-Za-z_][A-Za-z0-9_]*=/.test(tokens[i])) {
+    const word = tokens[i]
+    if (/^[A-Za-z_][A-Za-z0-9_]*=/.test(word)) {
+      out.push(["<assign>", word])
       i += 1
-    } else if (WRAPPERS.has(basename(tokens[i]))) {
-      const wrapper = basename(tokens[i])
+    } else if (KEYWORDS.has(word)) {
       i += 1
-      if (wrapper === "command" && (tokens[i] === "-v" || tokens[i] === "-V")) {
-        // `command -v name` only looks a command up; nothing runs.
-        return tokens.length
-      }
+    } else if (WRAPPERS.has(basename(word))) {
+      const valued = WRAPPER_VALUED[basename(word)]
+      i += 1
       while (i < tokens.length && tokens[i].startsWith("-")) {
-        i += takesValue(wrapper, tokens[i]) ? 2 : 1
+        i += valued?.has(tokens[i]) ? 2 : 1
       }
     } else {
       break
     }
   }
-  return i
-}
-
-/** Expands `sh -c "…"` and `eval …` bodies and strips wrappers and VAR=value prefixes. */
-const normalize = (segments) => {
-  const out = []
-  const visit = (tokens, depth) => {
-    if (depth > NESTING_LIMIT) {
-      denyNesting()
+  const rest = tokens.slice(i)
+  if (rest[0] === "export") {
+    for (const assignment of rest.slice(1)) {
+      out.push(["<assign>", assignment])
     }
-    let i = 0
-    while (i < tokens.length) {
-      const word = tokens[i]
-      if (word === "function") {
-        i += 2
-      } else if (KEYWORDS.has(word)) {
-        i++
-      } else if (/^[A-Za-z_][A-Za-z0-9_]*=/.test(word)) {
-        out.push(["<assign>", word])
-        i++
-      } else if (WRAPPERS.has(basename(word))) {
-        // Skip the wrapper and its own options (env -i, xargs -0, sudo -u name).
-        const wrapper = basename(word)
-        i++
-        if (wrapper === "command" && (tokens[i] === "-v" || tokens[i] === "-V")) {
-          return
-        }
-        while (i < tokens.length && tokens[i].startsWith("-")) {
-          i += takesValue(wrapper, tokens[i]) ? 2 : 1
-        }
-      } else {
-        break
-      }
-    }
-    const rest = tokens.slice(i)
-    if (rest.length === 0) {
-      return
-    }
-    const head = basename(rest[0])
-    if (SHELLS.has(head)) {
-      // -c may be clustered: bash -lc "…", sh -xc "…".
-      const at = rest.findIndex((arg) => /^-[a-zA-Z]*c[a-zA-Z]*$/.test(arg))
-      if (at !== -1 && rest[at + 1] !== undefined) {
-        for (const inner of tokenize(rest[at + 1])) {
-          visit(inner, depth + 1)
-        }
-        return
-      }
-    }
-    if (head === "eval") {
-      for (const inner of tokenize(rest.slice(1).join(" "))) {
-        visit(inner, depth + 1)
-      }
-      return
-    }
-    if (head === "export") {
-      for (const assignment of rest.slice(1)) {
-        out.push(["<assign>", assignment])
-      }
-      return
-    }
-    out.push([head, ...rest.slice(1)])
+    return out
   }
-  for (const segment of segments) {
-    visit(segment, 0)
+  if (rest.length > 0) {
+    out.push([basename(rest[0]), ...rest.slice(1)])
   }
   return out
 }
@@ -686,8 +383,8 @@ const judgeRm = (args) => {
   const flags = args.filter((arg) => arg.startsWith("-"))
   const targets = args.filter((arg) => !arg.startsWith("-"))
   const recursive = flags.some((flag) => flag === "--recursive" || /^-[a-zA-Z]*[rR]/.test(flag))
-  if (recursive && targets.length === 0) {
-    // `rm -rf $(pwd)`: the substitution became its own segment, leaving no target to judge.
+  if (recursive && (targets.length === 0 || targets.some((target) => /\$\(|`/.test(target)))) {
+    // `rm -rf $(pwd)`: a target that is a substitution cannot be judged.
     deny(
       "recursive rm whose target comes from a substitution or pipe cannot be checked",
       "name the exact directories to remove",
@@ -737,9 +434,8 @@ const judgePackageManager = (args) => {
         // The body is a shell command: every rule applies, and its bare
         // executables are judged as if npx had launched them.
         const body = inline ?? rest[i + 1] ?? ""
-        const segments = normalize(tokenize(body))
-        judgeSegments(segments)
-        for (const [head] of segments) {
+        judgeCommand(body)
+        for (const [head] of tokenize(body).segments.flatMap(normalize)) {
           judgeExecutor([head])
         }
       }
@@ -789,60 +485,38 @@ const judgeSegments = (segments) => {
   }
 }
 
-const NESTING_LIMIT = 4
-const denyNesting = () =>
-  deny(
-    `the command nests more than ${NESTING_LIMIT} levels of substitutions or shell bodies`,
-    "flatten it: run the inner commands as their own steps",
-  )
-
+/** Judges one command: its substitution and shell bodies first, then every segment. */
 const judgeCommand = (command, depth = 0) => {
-  if (depth > NESTING_LIMIT) {
-    denyNesting()
+  if (depth > 3) {
+    return
   }
-  const raw = tokenize(command)
-  // Nested command bodies — `$(…)`, backticks, `sh -c '…'`, `eval …` — are
-  // commands of their own, pipelines included.
-  for (const body of nestedBodies.get(raw) ?? []) {
+  const { segments, joins, bodies } = tokenize(command)
+  for (const body of bodies) {
     judgeCommand(body, depth + 1)
   }
-  for (const segment of raw) {
-    // `env -S "git push -f"` splits its string into a command of its own.
-    for (let at = 0; at < segment.length; at++) {
-      if (basename(segment[at]) === "env") {
-        const split = segment.findIndex(
-          (arg, index) => index > at && (arg === "-S" || arg === "--split-string"),
-        )
-        if (split !== -1 && segment[split + 1] !== undefined) {
-          judgeCommand(segment[split + 1], depth + 1)
+  const normalized = segments.map(normalize)
+  normalized.forEach((forms, index) => {
+    for (const [head, ...args] of forms) {
+      if (SHELLS.has(head)) {
+        const at = args.findIndex((arg) => /^-[a-zA-Z]*c[a-zA-Z]*$/.test(arg))
+        if (at !== -1 && args[at + 1] !== undefined) {
+          judgeCommand(args[at + 1], depth + 1)
         }
-        break
+      } else if (head === "eval") {
+        judgeCommand(args.join(" "), depth + 1)
       }
-    }
-    const rest = segment.slice(afterPrefixes(segment))
-    const head = basename(rest[0] ?? "")
-    if (SHELLS.has(head)) {
-      const at = rest.findIndex((arg) => /^-[a-zA-Z]*c[a-zA-Z]*$/.test(arg))
-      if (at !== -1 && rest[at + 1] !== undefined) {
-        judgeCommand(rest[at + 1], depth + 1)
+      // `find … | xargs rm`: the delete sits in the segment a pipe leads to.
+      if (
+        head === "find" &&
+        args.some((arg) => PROTECTED_NAME.test(arg)) &&
+        joins[index] === "|" &&
+        (normalized[index + 1] ?? []).some(([next]) => next === "rm")
+      ) {
+        deny("a find over .git or the lockfile piped into rm", "use git and npm to manage those")
       }
-    } else if (head === "eval") {
-      judgeCommand(rest.slice(1).join(" "), depth + 1)
-    }
-  }
-  // `find … | xargs rm`: the delete sits in the segment a pipe leads to.
-  raw.forEach((segment, index) => {
-    const [head, ...args] = segment
-    if (basename(head) !== "find" || !args.some((arg) => PROTECTED_NAME.test(arg))) {
-      return
-    }
-    const downstream = raw[index + 1] === undefined ? [] : normalize([raw[index + 1]])
-    if (pipedInto(raw, index) && downstream.some(([h]) => basename(h) === "rm")) {
-      deny("a find over .git or the lockfile piped into rm", "use git and npm to manage those")
     }
   })
-  // Everything else (including sh -c bodies) is judged on the normalized segments.
-  judgeSegments(normalize(raw))
+  judgeSegments(normalized.flat())
 }
 
 // ------------------------------------------------------------------- paths
