@@ -1,0 +1,1330 @@
+{
+  "describe": {
+    "cli": {
+      "name": "lasso"
+    },
+    "commands": [
+      {
+        "capabilities": {
+          "idempotency": {
+            "kind": "always"
+          },
+          "mutates": false,
+          "supportsDryRun": false
+        },
+        "errorCodes": [
+          "cannot_write",
+          "internal_error",
+          "interrupted",
+          "invalid_config",
+          "invalid_data",
+          "invalid_usage"
+        ],
+        "examples": [
+          {
+            "command": "lasso task list --status all --json",
+            "description": "List every task as a JSON envelope"
+          },
+          {
+            "command": "lasso task list --format ndjson --fields id,title",
+            "description": "Stream open tasks as NDJSON, projecting two fields"
+          }
+        ],
+        "guides": ["task-ids"],
+        "name": "task list",
+        "params": [
+          {
+            "choices": ["open", "done", "all"],
+            "cliName": "--status",
+            "default": "open",
+            "description": "Filter tasks by status",
+            "key": "status",
+            "kind": "flag",
+            "owner": "contract",
+            "required": false,
+            "type": "choice"
+          },
+          {
+            "cliName": "--fields",
+            "description": "Comma-separated projection of item fields (id, title, status, createdAt)",
+            "key": "fields",
+            "kind": "flag",
+            "owner": "framework",
+            "required": false,
+            "type": "string"
+          }
+        ],
+        "resultVariants": ["success", "projected"],
+        "stability": "stable",
+        "summary": "List tasks"
+      },
+      {
+        "capabilities": {
+          "idempotency": {
+            "kind": "always"
+          },
+          "mutates": false,
+          "supportsDryRun": false
+        },
+        "errorCodes": [
+          "cannot_write",
+          "internal_error",
+          "interrupted",
+          "invalid_config",
+          "invalid_data",
+          "invalid_usage"
+        ],
+        "examples": [
+          {
+            "command": "lasso task audit --format ndjson",
+            "description": "Audit the store with progress events"
+          }
+        ],
+        "guides": [],
+        "name": "task audit",
+        "params": [],
+        "resultVariants": ["success"],
+        "stability": "experimental",
+        "summary": "Check the task store for duplicate ids and count entries"
+      },
+      {
+        "capabilities": {
+          "idempotency": {
+            "kind": "conditional",
+            "parameter": "ifNotExists"
+          },
+          "mutates": true,
+          "supportsDryRun": true
+        },
+        "errorCodes": [
+          "cannot_write",
+          "internal_error",
+          "interrupted",
+          "invalid_config",
+          "invalid_data",
+          "invalid_usage",
+          "resource_conflict",
+          "stale_confirmation",
+          "transient_failure"
+        ],
+        "examples": [
+          {
+            "command": "lasso task create \"Ship the kit\" --yes --json",
+            "description": "Create a task in one non-interactive step"
+          },
+          {
+            "command": "lasso task create \"Ship the kit\" --dry-run --json",
+            "description": "Preview the plan without changing anything"
+          }
+        ],
+        "guides": ["task-ids", "mutation-replay"],
+        "name": "task create",
+        "params": [
+          {
+            "cliName": "<title>",
+            "description": "Task title",
+            "key": "title",
+            "kind": "argument",
+            "owner": "contract",
+            "required": true,
+            "type": "string"
+          },
+          {
+            "cliName": "--if-not-exists",
+            "description": "Succeed without changes when the task already exists",
+            "key": "ifNotExists",
+            "kind": "flag",
+            "owner": "contract",
+            "required": false,
+            "type": "boolean"
+          },
+          {
+            "cliName": "--dry-run",
+            "description": "Render the execution plan without applying it",
+            "key": "dryRun",
+            "kind": "flag",
+            "owner": "framework",
+            "required": false,
+            "type": "boolean"
+          },
+          {
+            "cliName": "--confirm",
+            "description": "Confirmation token from a previous run",
+            "key": "confirm",
+            "kind": "flag",
+            "owner": "framework",
+            "required": false,
+            "type": "string"
+          },
+          {
+            "alias": "y",
+            "cliName": "--yes",
+            "description": "Apply without a separate confirmation step",
+            "key": "yes",
+            "kind": "flag",
+            "owner": "framework",
+            "required": false,
+            "type": "boolean"
+          }
+        ],
+        "resultVariants": ["success", "dryRun", "confirmationRequired"],
+        "stability": "stable",
+        "summary": "Create a task"
+      },
+      {
+        "capabilities": {
+          "idempotency": {
+            "kind": "always"
+          },
+          "mutates": false,
+          "supportsDryRun": false
+        },
+        "errorCodes": [
+          "internal_error",
+          "interrupted",
+          "invalid_data",
+          "invalid_usage",
+          "not_found"
+        ],
+        "examples": [
+          {
+            "command": "lasso describe --json",
+            "description": "Full machine-readable CLI inventory"
+          },
+          {
+            "command": "lasso describe --command \"task create\" --json",
+            "description": "One command's surface and guides, for a smaller context budget"
+          }
+        ],
+        "guides": [],
+        "name": "describe",
+        "params": [
+          {
+            "cliName": "--command",
+            "description": "Describe one command only (its full name, e.g. \"task create\"), with just the guides it references",
+            "key": "command",
+            "kind": "flag",
+            "owner": "contract",
+            "required": false,
+            "type": "string"
+          }
+        ],
+        "resultVariants": ["success"],
+        "stability": "stable",
+        "summary": "Describe every command, capability, guide, and protocol detail as JSON"
+      },
+      {
+        "capabilities": {
+          "idempotency": {
+            "kind": "always"
+          },
+          "mutates": false,
+          "supportsDryRun": false
+        },
+        "errorCodes": ["internal_error", "interrupted", "invalid_data", "invalid_usage"],
+        "examples": [
+          {
+            "command": "lasso schema --json",
+            "description": "JSON Schema for every command surface"
+          }
+        ],
+        "guides": [],
+        "name": "schema",
+        "params": [],
+        "resultVariants": ["success"],
+        "stability": "stable",
+        "summary": "Emit JSON Schema (draft 2020-12) for command params, outputs, and plans"
+      },
+      {
+        "capabilities": {
+          "idempotency": {
+            "kind": "always"
+          },
+          "mutates": false,
+          "supportsDryRun": false
+        },
+        "errorCodes": ["internal_error", "interrupted", "invalid_data", "invalid_usage"],
+        "examples": [
+          {
+            "command": "lasso guide list --json",
+            "description": "The topic inventory as a JSON envelope"
+          },
+          {
+            "command": "lasso guide list --format ndjson --fields topic,brief",
+            "description": "Stream topics, projecting the fields an agent needs to choose one"
+          }
+        ],
+        "guides": [],
+        "name": "guide list",
+        "params": [
+          {
+            "cliName": "--fields",
+            "description": "Comma-separated projection of item fields (topic, title, brief, bytes, commands)",
+            "key": "fields",
+            "kind": "flag",
+            "owner": "framework",
+            "required": false,
+            "type": "string"
+          }
+        ],
+        "resultVariants": ["success", "projected"],
+        "stability": "stable",
+        "summary": "List every guide topic with its brief, size, and the commands it covers"
+      },
+      {
+        "capabilities": {
+          "idempotency": {
+            "kind": "always"
+          },
+          "mutates": false,
+          "supportsDryRun": false
+        },
+        "errorCodes": [
+          "internal_error",
+          "interrupted",
+          "invalid_data",
+          "invalid_usage",
+          "not_found"
+        ],
+        "examples": [
+          {
+            "command": "lasso guide get task-ids --json",
+            "description": "One topic as a JSON envelope"
+          },
+          {
+            "command": "lasso guide get task-ids",
+            "description": "The topic as Markdown on a terminal"
+          },
+          {
+            "command": "lasso guide get task-ids --brief --json",
+            "description": "Only the synopsis, to decide whether the full topic is worth loading"
+          }
+        ],
+        "guides": [],
+        "name": "guide get",
+        "params": [
+          {
+            "cliName": "<topic>",
+            "description": "Topic id from `guide list`",
+            "key": "topic",
+            "kind": "argument",
+            "owner": "contract",
+            "required": true,
+            "type": "string"
+          },
+          {
+            "cliName": "--brief",
+            "description": "Return only the brief (the one-to-three sentence synopsis)",
+            "key": "brief",
+            "kind": "flag",
+            "owner": "contract",
+            "required": false,
+            "type": "boolean"
+          }
+        ],
+        "resultVariants": ["success"],
+        "stability": "stable",
+        "summary": "Read one guide topic, in full or as its brief"
+      }
+    ],
+    "guideTopics": [
+      {
+        "brief": "What a confirmation token binds, why a replay can come back stale, and how --if-not-exists turns a conflict into a no-op. Read this before automating any mutation beyond a single --yes.",
+        "commands": ["task create"],
+        "title": "Confirmation tokens, replay, and idempotent writes",
+        "topic": "mutation-replay"
+      },
+      {
+        "brief": "A task id is derived from its title, not assigned by the store. Read this before creating tasks whose ids you need to predict, reference, or de-duplicate.",
+        "commands": ["task create", "task list"],
+        "title": "How task ids are derived",
+        "topic": "task-ids"
+      }
+    ],
+    "protocol": {
+      "errorCatalog": [
+        {
+          "code": "auth_failure",
+          "exit": 77,
+          "transient": false
+        },
+        {
+          "code": "cannot_write",
+          "exit": 73,
+          "transient": false
+        },
+        {
+          "code": "internal_error",
+          "exit": 70,
+          "transient": false
+        },
+        {
+          "code": "interrupted",
+          "exit": 130,
+          "transient": true
+        },
+        {
+          "code": "invalid_config",
+          "exit": 78,
+          "transient": false
+        },
+        {
+          "code": "invalid_data",
+          "exit": 65,
+          "transient": false
+        },
+        {
+          "code": "invalid_usage",
+          "exit": 64,
+          "transient": false
+        },
+        {
+          "code": "not_found",
+          "exit": 65,
+          "transient": false
+        },
+        {
+          "code": "resource_conflict",
+          "exit": 73,
+          "transient": false
+        },
+        {
+          "code": "service_unavailable",
+          "exit": 69,
+          "transient": true
+        },
+        {
+          "code": "stale_confirmation",
+          "exit": 64,
+          "transient": false
+        },
+        {
+          "code": "transient_failure",
+          "exit": 75,
+          "transient": true
+        }
+      ],
+      "exitCodes": {
+        "auth": 77,
+        "cannotWrite": 73,
+        "config": 78,
+        "confirmationRequired": 4,
+        "internalDefect": 70,
+        "interrupted": 130,
+        "invalidData": 65,
+        "serviceUnavailable": 69,
+        "success": 0,
+        "transient": 75,
+        "usage": 64
+      },
+      "flagSpellings": "Boolean flags also accept a --no-<name> negated form and --<name>=true|false.",
+      "formats": ["json", "text", "ndjson"],
+      "globalFlags": [
+        {
+          "cliName": "--json",
+          "description": "Output a JSON envelope"
+        },
+        {
+          "cliName": "--format",
+          "description": "Output format: auto | json | text | ndjson",
+          "values": ["auto", "json", "text", "ndjson"]
+        },
+        {
+          "cliName": "--no-input",
+          "description": "Never wait for input (machine formats never prompt; only --wizard in text mode on a terminal does)"
+        },
+        {
+          "alias": "h",
+          "cliName": "--help",
+          "description": "In machine formats, answers with this describe payload"
+        },
+        {
+          "alias": "v",
+          "cliName": "--version",
+          "description": "CLI version (envelope or summary event)"
+        },
+        {
+          "cliName": "--log-level",
+          "description": "Runtime log level (diagnostics go to stderr)",
+          "values": ["all", "trace", "debug", "info", "warn", "warning", "error", "fatal", "none"]
+        },
+        {
+          "cliName": "--wizard",
+          "description": "Interactive wizard — text mode on a terminal only"
+        },
+        {
+          "cliName": "--completions",
+          "description": "Print a shell completion script — text mode only",
+          "values": ["bash", "zsh", "fish", "sh"]
+        }
+      ],
+      "guidance": {
+        "guides": "Guide topic ids to read for the model this outcome assumes; fetch with: guide get <topic>",
+        "next": "Executable next moves as argv for this binary (no bin name), importance-ordered, at most 3, on every terminal outcome."
+      },
+      "ndjsonEvents": ["item", "warning", "progress", "summary", "confirmation_required", "error"]
+    },
+    "schemaVersion": "1"
+  },
+  "schema": {
+    "cli": {
+      "name": "lasso"
+    },
+    "commands": [
+      {
+        "name": "task list",
+        "output": {
+          "$defs": {
+            "lasso/domain/TaskEncoded": {
+              "additionalProperties": false,
+              "properties": {
+                "createdAt": {
+                  "type": "string"
+                },
+                "id": {
+                  "type": "string"
+                },
+                "status": {
+                  "enum": ["open", "done"],
+                  "type": "string"
+                },
+                "title": {
+                  "allOf": [
+                    {
+                      "minLength": 1
+                    }
+                  ],
+                  "type": "string"
+                }
+              },
+              "required": ["id", "title", "status", "createdAt"],
+              "type": "object"
+            }
+          },
+          "$schema": "https://json-schema.org/draft/2020-12/schema",
+          "additionalProperties": false,
+          "properties": {
+            "count": {
+              "type": "integer"
+            },
+            "items": {
+              "items": {
+                "$ref": "#/$defs/lasso~1domain~1TaskEncoded"
+              },
+              "type": "array"
+            }
+          },
+          "required": ["items", "count"],
+          "type": "object"
+        },
+        "params": {
+          "$schema": "https://json-schema.org/draft/2020-12/schema",
+          "additionalProperties": false,
+          "properties": {
+            "fields": {
+              "description": "Comma-separated projection of item fields (id, title, status, createdAt)",
+              "type": "string"
+            },
+            "status": {
+              "default": "open",
+              "description": "Filter tasks by status",
+              "enum": ["open", "done", "all"],
+              "type": "string"
+            }
+          },
+          "required": [],
+          "type": "object"
+        },
+        "projected": {
+          "$schema": "https://json-schema.org/draft/2020-12/schema",
+          "additionalProperties": false,
+          "properties": {
+            "count": {
+              "type": "integer"
+            },
+            "items": {
+              "items": {
+                "propertyNames": {
+                  "enum": ["id", "title", "status", "createdAt"]
+                },
+                "type": "object"
+              },
+              "type": "array"
+            }
+          },
+          "required": ["items", "count"],
+          "type": "object"
+        }
+      },
+      {
+        "name": "task audit",
+        "output": {
+          "$schema": "https://json-schema.org/draft/2020-12/schema",
+          "additionalProperties": false,
+          "properties": {
+            "duplicateIds": {
+              "type": "integer"
+            },
+            "tasks": {
+              "type": "integer"
+            }
+          },
+          "required": ["tasks", "duplicateIds"],
+          "type": "object"
+        },
+        "params": {
+          "$schema": "https://json-schema.org/draft/2020-12/schema",
+          "additionalProperties": false,
+          "properties": {},
+          "required": [],
+          "type": "object"
+        }
+      },
+      {
+        "name": "task create",
+        "output": {
+          "$defs": {
+            "lasso/domain/TaskEncoded": {
+              "additionalProperties": false,
+              "properties": {
+                "createdAt": {
+                  "type": "string"
+                },
+                "id": {
+                  "type": "string"
+                },
+                "status": {
+                  "enum": ["open", "done"],
+                  "type": "string"
+                },
+                "title": {
+                  "allOf": [
+                    {
+                      "minLength": 1
+                    }
+                  ],
+                  "type": "string"
+                }
+              },
+              "required": ["id", "title", "status", "createdAt"],
+              "type": "object"
+            }
+          },
+          "$schema": "https://json-schema.org/draft/2020-12/schema",
+          "additionalProperties": false,
+          "properties": {
+            "created": {
+              "type": "boolean"
+            },
+            "task": {
+              "$ref": "#/$defs/lasso~1domain~1TaskEncoded"
+            }
+          },
+          "required": ["created", "task"],
+          "type": "object"
+        },
+        "params": {
+          "$schema": "https://json-schema.org/draft/2020-12/schema",
+          "additionalProperties": false,
+          "properties": {
+            "confirm": {
+              "description": "Confirmation token from a previous run",
+              "type": "string"
+            },
+            "dryRun": {
+              "description": "Render the execution plan without applying it",
+              "type": "boolean"
+            },
+            "ifNotExists": {
+              "description": "Succeed without changes when the task already exists",
+              "type": "boolean"
+            },
+            "title": {
+              "description": "Task title",
+              "type": "string"
+            },
+            "yes": {
+              "description": "Apply without a separate confirmation step",
+              "type": "boolean"
+            }
+          },
+          "required": ["title"],
+          "type": "object"
+        },
+        "plan": {
+          "$schema": "https://json-schema.org/draft/2020-12/schema",
+          "anyOf": [
+            {
+              "additionalProperties": false,
+              "properties": {
+                "action": {
+                  "enum": ["create_task"],
+                  "type": "string"
+                },
+                "task": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "id": {
+                      "type": "string"
+                    },
+                    "status": {
+                      "enum": ["open"],
+                      "type": "string"
+                    },
+                    "title": {
+                      "type": "string"
+                    }
+                  },
+                  "required": ["id", "title", "status"],
+                  "type": "object"
+                }
+              },
+              "required": ["action", "task"],
+              "type": "object"
+            },
+            {
+              "additionalProperties": false,
+              "properties": {
+                "action": {
+                  "enum": ["no_op"],
+                  "type": "string"
+                },
+                "reason": {
+                  "enum": ["already_exists"],
+                  "type": "string"
+                },
+                "taskId": {
+                  "type": "string"
+                }
+              },
+              "required": ["action", "reason", "taskId"],
+              "type": "object"
+            }
+          ]
+        }
+      },
+      {
+        "name": "describe",
+        "output": {
+          "$schema": "https://json-schema.org/draft/2020-12/schema"
+        },
+        "params": {
+          "$schema": "https://json-schema.org/draft/2020-12/schema",
+          "additionalProperties": false,
+          "properties": {
+            "command": {
+              "description": "Describe one command only (its full name, e.g. \"task create\"), with just the guides it references",
+              "type": "string"
+            }
+          },
+          "required": [],
+          "type": "object"
+        }
+      },
+      {
+        "name": "schema",
+        "output": {
+          "$schema": "https://json-schema.org/draft/2020-12/schema"
+        },
+        "params": {
+          "$schema": "https://json-schema.org/draft/2020-12/schema",
+          "additionalProperties": false,
+          "properties": {},
+          "required": [],
+          "type": "object"
+        }
+      },
+      {
+        "name": "guide list",
+        "output": {
+          "$schema": "https://json-schema.org/draft/2020-12/schema",
+          "additionalProperties": false,
+          "properties": {
+            "count": {
+              "type": "integer"
+            },
+            "items": {
+              "items": {
+                "additionalProperties": false,
+                "properties": {
+                  "brief": {
+                    "type": "string"
+                  },
+                  "bytes": {
+                    "type": "integer"
+                  },
+                  "commands": {
+                    "items": {
+                      "type": "string"
+                    },
+                    "type": "array"
+                  },
+                  "title": {
+                    "type": "string"
+                  },
+                  "topic": {
+                    "type": "string"
+                  }
+                },
+                "required": ["topic", "title", "brief", "bytes", "commands"],
+                "type": "object"
+              },
+              "type": "array"
+            }
+          },
+          "required": ["items", "count"],
+          "type": "object"
+        },
+        "params": {
+          "$schema": "https://json-schema.org/draft/2020-12/schema",
+          "additionalProperties": false,
+          "properties": {
+            "fields": {
+              "description": "Comma-separated projection of item fields (topic, title, brief, bytes, commands)",
+              "type": "string"
+            }
+          },
+          "required": [],
+          "type": "object"
+        },
+        "projected": {
+          "$schema": "https://json-schema.org/draft/2020-12/schema",
+          "additionalProperties": false,
+          "properties": {
+            "count": {
+              "type": "integer"
+            },
+            "items": {
+              "items": {
+                "propertyNames": {
+                  "enum": ["topic", "title", "brief", "bytes", "commands"]
+                },
+                "type": "object"
+              },
+              "type": "array"
+            }
+          },
+          "required": ["items", "count"],
+          "type": "object"
+        }
+      },
+      {
+        "name": "guide get",
+        "output": {
+          "$schema": "https://json-schema.org/draft/2020-12/schema",
+          "additionalProperties": false,
+          "properties": {
+            "brief": {
+              "type": "string"
+            },
+            "commands": {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "content": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "title": {
+              "type": "string"
+            },
+            "topic": {
+              "type": "string"
+            }
+          },
+          "required": ["topic", "title", "brief", "commands"],
+          "type": "object"
+        },
+        "params": {
+          "$schema": "https://json-schema.org/draft/2020-12/schema",
+          "additionalProperties": false,
+          "properties": {
+            "brief": {
+              "description": "Return only the brief (the one-to-three sentence synopsis)",
+              "type": "boolean"
+            },
+            "topic": {
+              "description": "Topic id from `guide list`",
+              "type": "string"
+            }
+          },
+          "required": ["topic"],
+          "type": "object"
+        }
+      }
+    ],
+    "dialect": "https://json-schema.org/draft/2020-12/schema",
+    "protocol": {
+      "envelopes": {
+        "confirmationRequired": {
+          "$schema": "https://json-schema.org/draft/2020-12/schema",
+          "additionalProperties": false,
+          "properties": {
+            "confirmation": {
+              "additionalProperties": false,
+              "properties": {
+                "confirmArgs": {
+                  "items": {
+                    "type": "string"
+                  },
+                  "type": "array"
+                },
+                "confirmCommand": {
+                  "type": "string"
+                },
+                "token": {
+                  "type": "string"
+                }
+              },
+              "required": ["token", "confirmArgs", "confirmCommand"],
+              "type": "object"
+            },
+            "guides": {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "next": {
+              "items": {
+                "additionalProperties": false,
+                "properties": {
+                  "args": {
+                    "items": {
+                      "type": "string"
+                    },
+                    "type": "array"
+                  },
+                  "message": {
+                    "allOf": [
+                      {
+                        "minLength": 1
+                      }
+                    ],
+                    "type": "string"
+                  }
+                },
+                "required": ["message", "args"],
+                "type": "object"
+              },
+              "type": "array"
+            },
+            "plan": {},
+            "schemaVersion": {
+              "enum": ["1"],
+              "type": "string"
+            },
+            "status": {
+              "enum": ["confirmation_required"],
+              "type": "string"
+            },
+            "warnings": {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            }
+          },
+          "required": [
+            "schemaVersion",
+            "status",
+            "plan",
+            "confirmation",
+            "warnings",
+            "next",
+            "guides"
+          ],
+          "type": "object"
+        },
+        "error": {
+          "$schema": "https://json-schema.org/draft/2020-12/schema",
+          "additionalProperties": false,
+          "properties": {
+            "error": {
+              "additionalProperties": false,
+              "properties": {
+                "code": {
+                  "enum": [
+                    "invalid_usage",
+                    "invalid_data",
+                    "not_found",
+                    "resource_conflict",
+                    "cannot_write",
+                    "service_unavailable",
+                    "transient_failure",
+                    "auth_failure",
+                    "invalid_config",
+                    "stale_confirmation",
+                    "internal_error",
+                    "interrupted"
+                  ],
+                  "type": "string"
+                },
+                "details": {
+                  "anyOf": [
+                    {},
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "fix": {
+                  "type": "string"
+                },
+                "message": {
+                  "type": "string"
+                },
+                "transient": {
+                  "type": "boolean"
+                }
+              },
+              "required": ["code", "message", "fix", "transient"],
+              "type": "object"
+            },
+            "guides": {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "next": {
+              "items": {
+                "additionalProperties": false,
+                "properties": {
+                  "args": {
+                    "items": {
+                      "type": "string"
+                    },
+                    "type": "array"
+                  },
+                  "message": {
+                    "allOf": [
+                      {
+                        "minLength": 1
+                      }
+                    ],
+                    "type": "string"
+                  }
+                },
+                "required": ["message", "args"],
+                "type": "object"
+              },
+              "type": "array"
+            },
+            "schemaVersion": {
+              "enum": ["1"],
+              "type": "string"
+            },
+            "status": {
+              "enum": ["error"],
+              "type": "string"
+            },
+            "warnings": {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            }
+          },
+          "required": ["schemaVersion", "status", "error", "warnings", "next", "guides"],
+          "type": "object"
+        },
+        "ok": {
+          "$schema": "https://json-schema.org/draft/2020-12/schema",
+          "additionalProperties": false,
+          "properties": {
+            "data": {},
+            "guides": {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "next": {
+              "items": {
+                "additionalProperties": false,
+                "properties": {
+                  "args": {
+                    "items": {
+                      "type": "string"
+                    },
+                    "type": "array"
+                  },
+                  "message": {
+                    "allOf": [
+                      {
+                        "minLength": 1
+                      }
+                    ],
+                    "type": "string"
+                  }
+                },
+                "required": ["message", "args"],
+                "type": "object"
+              },
+              "type": "array"
+            },
+            "schemaVersion": {
+              "enum": ["1"],
+              "type": "string"
+            },
+            "status": {
+              "enum": ["ok"],
+              "type": "string"
+            },
+            "warnings": {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            }
+          },
+          "required": ["schemaVersion", "status", "data", "warnings", "next", "guides"],
+          "type": "object"
+        }
+      },
+      "streamEvent": {
+        "$defs": {
+          "Arrays_": {
+            "items": {
+              "additionalProperties": false,
+              "properties": {
+                "args": {
+                  "items": {
+                    "type": "string"
+                  },
+                  "type": "array"
+                },
+                "message": {
+                  "allOf": [
+                    {
+                      "minLength": 1
+                    }
+                  ],
+                  "type": "string"
+                }
+              },
+              "required": ["message", "args"],
+              "type": "object"
+            },
+            "type": "array"
+          },
+          "Arrays_1": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          }
+        },
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "anyOf": [
+          {
+            "additionalProperties": false,
+            "properties": {
+              "data": {},
+              "event": {
+                "enum": ["item"],
+                "type": "string"
+              }
+            },
+            "required": ["event", "data"],
+            "type": "object"
+          },
+          {
+            "additionalProperties": false,
+            "properties": {
+              "event": {
+                "enum": ["warning"],
+                "type": "string"
+              },
+              "message": {
+                "type": "string"
+              }
+            },
+            "required": ["event", "message"],
+            "type": "object"
+          },
+          {
+            "additionalProperties": false,
+            "properties": {
+              "completed": {
+                "anyOf": [
+                  {
+                    "allOf": [
+                      {
+                        "minimum": 0
+                      }
+                    ],
+                    "type": "integer"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "event": {
+                "enum": ["progress"],
+                "type": "string"
+              },
+              "message": {
+                "allOf": [
+                  {
+                    "minLength": 1
+                  }
+                ],
+                "type": "string"
+              },
+              "phase": {
+                "allOf": [
+                  {
+                    "pattern": "^[a-z][a-z0-9]*(-[a-z0-9]+)*$"
+                  }
+                ],
+                "type": "string"
+              },
+              "total": {
+                "anyOf": [
+                  {
+                    "allOf": [
+                      {
+                        "minimum": 1
+                      }
+                    ],
+                    "type": "integer"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              }
+            },
+            "required": ["event", "phase", "message"],
+            "type": "object"
+          },
+          {
+            "additionalProperties": false,
+            "properties": {
+              "data": {},
+              "event": {
+                "enum": ["summary"],
+                "type": "string"
+              },
+              "guides": {
+                "$ref": "#/$defs/Arrays_1"
+              },
+              "next": {
+                "$ref": "#/$defs/Arrays_"
+              }
+            },
+            "required": ["event", "data", "next", "guides"],
+            "type": "object"
+          },
+          {
+            "additionalProperties": false,
+            "properties": {
+              "confirmation": {
+                "additionalProperties": false,
+                "properties": {
+                  "confirmArgs": {
+                    "items": {
+                      "type": "string"
+                    },
+                    "type": "array"
+                  },
+                  "confirmCommand": {
+                    "type": "string"
+                  },
+                  "token": {
+                    "type": "string"
+                  }
+                },
+                "required": ["token", "confirmArgs", "confirmCommand"],
+                "type": "object"
+              },
+              "event": {
+                "enum": ["confirmation_required"],
+                "type": "string"
+              },
+              "guides": {
+                "$ref": "#/$defs/Arrays_1"
+              },
+              "next": {
+                "$ref": "#/$defs/Arrays_"
+              },
+              "plan": {}
+            },
+            "required": ["event", "plan", "confirmation", "next", "guides"],
+            "type": "object"
+          },
+          {
+            "additionalProperties": false,
+            "properties": {
+              "error": {
+                "additionalProperties": false,
+                "properties": {
+                  "code": {
+                    "enum": [
+                      "invalid_usage",
+                      "invalid_data",
+                      "not_found",
+                      "resource_conflict",
+                      "cannot_write",
+                      "service_unavailable",
+                      "transient_failure",
+                      "auth_failure",
+                      "invalid_config",
+                      "stale_confirmation",
+                      "internal_error",
+                      "interrupted"
+                    ],
+                    "type": "string"
+                  },
+                  "details": {
+                    "anyOf": [
+                      {},
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "fix": {
+                    "type": "string"
+                  },
+                  "message": {
+                    "type": "string"
+                  },
+                  "transient": {
+                    "type": "boolean"
+                  }
+                },
+                "required": ["code", "message", "fix", "transient"],
+                "type": "object"
+              },
+              "event": {
+                "enum": ["error"],
+                "type": "string"
+              },
+              "guides": {
+                "$ref": "#/$defs/Arrays_1"
+              },
+              "next": {
+                "$ref": "#/$defs/Arrays_"
+              }
+            },
+            "required": ["event", "error", "next", "guides"],
+            "type": "object"
+          }
+        ]
+      }
+    },
+    "schemaVersion": "1"
+  }
+}

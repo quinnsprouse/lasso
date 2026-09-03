@@ -1,22 +1,13 @@
-import { Effect, FileSystem, Layer, Path, Schema, Sink, Stdio, Terminal } from "effect"
-import type { Exit } from "effect"
-import { ChildProcessSpawner } from "effect/unstable/process"
-import { describe, expect, it } from "vitest"
-import { buildRoot, runRoot } from "../../src/contract/adapter.ts"
-import {
-  ConfirmationEnvelope,
-  ErrorEnvelope,
-  OkEnvelope,
-  StreamEvent,
-} from "../../src/output/envelope.ts"
+import { Console, Effect, Schema } from "effect"
+import { afterEach, describe, expect, it, vi } from "vitest"
 import { defineMutation, defineQuery } from "../../src/contract/contract.ts"
 import type { OutputMode } from "../../src/output/format.ts"
-import { Renderer } from "../../src/output/renderer.ts"
-import { settleExit } from "../../src/runtime.ts"
 import { Progress } from "../../src/output/progress.ts"
-import { StoreReader, StoreWriter } from "../../src/services/store.ts"
+import { StoreReader } from "../../src/services/store.ts"
 import { Task } from "../../src/domain/task.ts"
 import { taskCreate } from "../../src/commands/task-create.ts"
+import { taskList } from "../../src/commands/task-list.ts"
+import { lines, makeInvoke } from "./harness.ts"
 
 /**
  * The outcome matrix: the ENTIRE runtime — parser, contract adapter,
@@ -24,19 +15,6 @@ import { taskCreate } from "../../src/commands/task-create.ts"
  * where the mutation state machine and stream-shape guarantees are proven,
  * without ever spawning the binary.
  */
-
-const collect = (into: Array<string>) =>
-  Sink.forEach((chunk: string | Uint8Array) =>
-    Effect.sync(() => {
-      into.push(typeof chunk === "string" ? chunk : new TextDecoder().decode(chunk))
-    }),
-  )
-
-interface Invocation {
-  readonly stdout: string
-  readonly stderr: string
-  readonly code: number
-}
 
 const counters = { plan: 0, apply: 0 }
 let lastPlanInput: Record<string, unknown> = {}
@@ -166,7 +144,7 @@ const progressFailQuery = defineQuery({
       const progress = yield* Progress
       yield* progress.report({ phase: "warm-up", message: "starting" })
       const { Errors } = yield* Effect.promise(() => import("../../src/errors.ts"))
-      return yield* Errors.invalidData({ message: "went bad after progress" })
+      return yield* Errors.invalidData({ message: "went bad after progress", fix: "none" })
     }),
 })
 
@@ -227,7 +205,65 @@ const badProgressQuery = defineQuery({
     }),
 })
 
+const consoleLeakQuery = defineQuery({
+  name: "counter leak",
+  summary: "A handler that logs through Effect's Console",
+  stability: "experimental",
+  params: {},
+  dataSchema: Schema.Struct({ ok: Schema.Boolean }),
+  domainErrorCodes: [],
+  examples: [{ command: "lasso counter leak --json", description: "leak" }],
+  handler: () =>
+    Effect.gen(function* () {
+      yield* Console.log("debug leak")
+      yield* Console.debug("debug leak")
+      yield* Console.info("debug leak")
+      yield* Console.warn("debug leak")
+      yield* Console.table([{ leak: true }])
+      yield* Console.dir({ leak: true })
+      return { ok: true }
+    }),
+})
+
+/** A progress effect a handler built but did not run before returning. */
+let lateProgress: Effect.Effect<void> | undefined
+const lateProgressQuery = defineQuery({
+  name: "counter late",
+  summary: "Builds a progress effect and leaves it for later",
+  stability: "experimental",
+  params: {},
+  dataSchema: Schema.Struct({ done: Schema.Boolean }),
+  domainErrorCodes: [],
+  examples: [{ command: "lasso counter late --json", description: "late" }],
+  handler: () =>
+    Effect.gen(function* () {
+      const progress = yield* Progress
+      lateProgress = progress.report({ phase: "late", message: "after terminal" })
+      return { done: true }
+    }),
+})
+
+const badNextQuery = defineQuery({
+  name: "counter badnext",
+  summary: "Emits next actions the surface rejects",
+  stability: "experimental",
+  params: {},
+  dataSchema: Schema.Struct({ ok: Schema.Boolean }),
+  domainErrorCodes: [],
+  examples: [{ command: "lasso counter badnext --json", description: "bad next" }],
+  handler: () => Effect.succeed({ ok: true }),
+  next: () => [
+    { message: "bogus", args: ["nonsense"] },
+    { message: "valid", args: ["counter", "list", "--json"] },
+    { message: "bad flag", args: ["counter", "list", "--nope"] },
+  ],
+})
+
 const contracts = [
+  taskList,
+  badNextQuery,
+  consoleLeakQuery,
+  lateProgressQuery,
   counterMutation,
   failingQuery,
   listQuery,
@@ -247,93 +283,11 @@ const seedTask = new Task({
   createdAt: "2026-01-01T00:00:00.000Z",
 })
 
-const invoke = async (
+const invoke = (
   argv: ReadonlyArray<string>,
   format: OutputMode["format"] = "json",
   tasks: ReadonlyArray<Task> = [seedTask],
-): Promise<Invocation> => {
-  const mode: OutputMode = {
-    format,
-    noInput: true,
-    color: false,
-    argv,
-    helpRequested: false,
-    explicitFormat: true,
-  }
-  const out: Array<string> = []
-  const err: Array<string> = []
-
-  const testStdio = Stdio.layerTest({
-    stdout: () => collect(out),
-    stderr: () => collect(err),
-  })
-
-  const fakeServices = Layer.mergeAll(
-    Layer.succeed(StoreReader, StoreReader.of({ load: Effect.succeed(tasks) })),
-    Layer.succeed(
-      StoreWriter,
-      StoreWriter.of({ modify: (transform) => Effect.sync(() => transform(tasks) ?? tasks) }),
-    ),
-  )
-
-  const environment = Layer.mergeAll(
-    FileSystem.layerNoop({}),
-    Path.layer,
-    testStdio,
-    Layer.succeed(
-      Terminal.Terminal,
-      Terminal.make({
-        columns: Effect.succeed(80),
-        rows: Effect.succeed(24),
-        readInput: Effect.die("no input in tests"),
-        readLine: Effect.die("no input in tests"),
-        display: () => Effect.void,
-      }),
-    ),
-    Layer.succeed(
-      ChildProcessSpawner.ChildProcessSpawner,
-      ChildProcessSpawner.make(() => Effect.die("no processes in tests")),
-    ),
-  )
-
-  const root = buildRoot("lasso", "test cli", contracts)
-  const rendererLayer = Renderer.layer(mode, "lasso")
-  const layer = Layer.mergeAll(
-    fakeServices,
-    rendererLayer,
-    Progress.layer.pipe(Layer.provideMerge(rendererLayer)),
-  ).pipe(Layer.provideMerge(environment))
-  const exit: Exit.Exit<void, unknown> = await Effect.runPromiseExit(
-    runRoot(root, "0.0.0", argv).pipe(Effect.provide(layer)),
-  )
-  const settled = settleExit({ exit, mode, binName: "lasso", describeData: () => ({}) })
-  for (const chunk of settled.writes) {
-    ;(chunk.stream === "stdout" ? out : err).push(chunk.text)
-  }
-  return { stdout: out.join(""), stderr: err.join(""), code: settled.code }
-}
-
-const AnyEnvelope = Schema.Union([OkEnvelope, ErrorEnvelope, ConfirmationEnvelope])
-const decodeEnvelope = Schema.decodeUnknownSync(AnyEnvelope)
-const decodeEvent = Schema.decodeUnknownSync(StreamEvent)
-
-/**
- * Every stdout line is validated against the declared protocol schemas as it
- * is read — the envelope schemas are the executable spec, not documentation.
- */
-const lines = (text: string, wire: "json" | "ndjson" = "json"): Array<Record<string, any>> =>
-  text
-    .split("\n")
-    .filter((line) => line.length > 0)
-    .map((line) => {
-      const value = JSON.parse(line) as Record<string, any>
-      if (wire === "json") {
-        decodeEnvelope(value)
-      } else {
-        decodeEvent(value)
-      }
-      return value
-    })
+) => makeInvoke(contracts)(argv, format, tasks)
 
 const reset = () => {
   counters.plan = 0
@@ -429,7 +383,7 @@ describe("outcome matrix — stream shapes", () => {
   it("ndjson empty collection still ends with summary {count: 0}", async () => {
     const result = await invoke(["counter", "list"], "ndjson", [])
     const events = lines(result.stdout, "ndjson")
-    expect(events).toEqual([{ event: "summary", data: { count: 0 } }])
+    expect(events).toEqual([{ event: "summary", data: { count: 0 }, next: [], guides: [] }])
   })
 
   it("ndjson confirmation is a confirmation_required event", async () => {
@@ -609,5 +563,144 @@ describe("progress across the outcome matrix", () => {
     const envelopes = lines(result.stdout)
     expect(envelopes.length).toBe(1)
     expect(envelopes[0]!.error.code).toBe("internal_error")
+  })
+})
+
+describe("stdout purity against handler misbehavior", () => {
+  afterEach(() => {
+    vi.restoreAllMocks()
+  })
+
+  it("every Console method a handler can call lands on stderr, never in the envelope stream", async () => {
+    const stdoutWrite = vi.spyOn(process.stdout, "write").mockImplementation(() => true)
+    const stderrWrite = vi.spyOn(process.stderr, "write").mockImplementation(() => true)
+    const result = await invoke(["counter", "leak"])
+    expect(result.code).toBe(0)
+    expect(lines(result.stdout).length).toBe(1)
+    expect(lines(result.stdout)[0]!.status).toBe("ok")
+    expect(stdoutWrite).not.toHaveBeenCalled()
+    const leaked = stderrWrite.mock.calls.map((call) => String(call[0])).join("")
+    expect(leaked.split("debug leak").length - 1).toBe(4)
+    expect(leaked).toContain("leak")
+  })
+
+  it("Console output in ndjson mode leaves the event stream valid", async () => {
+    vi.spyOn(process.stderr, "write").mockImplementation(() => true)
+    const result = await invoke(["counter", "leak"], "ndjson")
+    expect(result.code).toBe(0)
+    expect(lines(result.stdout, "ndjson").map((event) => event.event)).toEqual(["summary"])
+  })
+
+  it("a progress effect run after the terminal event is a defect, not a write", async () => {
+    lateProgress = undefined
+    const result = await invoke(["counter", "late"], "ndjson")
+    expect(lines(result.stdout, "ndjson").map((event) => event.event)).toEqual(["summary"])
+    expect(lateProgress).toBeDefined()
+    const exit = await Effect.runPromiseExit(lateProgress!)
+    expect(exit._tag).toBe("Failure")
+    expect(String(exit)).toContain("progress after the terminal event")
+  })
+})
+
+describe("point-of-use guidance on the wire", () => {
+  it("every terminal envelope carries next and guides", async () => {
+    const ok = lines((await invoke(["counter", "list"])).stdout)[0]!
+    expect(ok.next).toEqual([])
+    expect(ok.guides).toEqual([])
+    reset()
+    const confirmation = lines((await invoke(["counter", "bump"])).stdout)[0]!
+    expect(confirmation.next).toEqual([
+      { message: "apply exactly this plan", args: confirmation.confirmation.confirmArgs },
+    ])
+    const failure = lines((await invoke(["counter", "fail"])).stdout)[0]!
+    expect(failure.next).toEqual([])
+    expect(failure.guides).toEqual([])
+  })
+
+  it("task create offers its guides on failure and a next move on success", async () => {
+    const conflict = lines((await invoke(["task", "create", "Seed", "--yes"])).stdout)[0]!
+    expect(conflict.error.code).toBe("resource_conflict")
+    expect(conflict.guides).toEqual(["task-ids", "mutation-replay"])
+    const created = lines((await invoke(["task", "create", "Fresh", "--yes"])).stdout)[0]!
+    expect(created.status).toBe("ok")
+    expect(created.next).toEqual([
+      {
+        message: "see the new task in the list",
+        args: ["task", "list", "--status", "all", "--json"],
+      },
+    ])
+    expect(created.guides).toEqual([])
+    expect(created.warnings).toEqual([])
+  })
+
+  it("dry run points at the confirmation flow, never at --yes", async () => {
+    const result = lines((await invoke(["task", "create", "Fresh", "--dry-run"])).stdout)[0]!
+    expect(result.next).toEqual([
+      {
+        message: "re-run without --dry-run to get a confirmation token",
+        args: ["task", "create", "Fresh", "--json"],
+      },
+    ])
+  })
+
+  it("runtime-owned next actions keep the machine flag before a -- terminator", async () => {
+    const result = lines(
+      (await invoke(["task", "create", "--dry-run", "--", "--weird"])).stdout,
+    )[0]!
+    expect(result.warnings).toEqual([])
+    expect(result.next).toEqual([
+      {
+        message: "re-run without --dry-run to get a confirmation token",
+        args: ["task", "create", "--json", "--", "--weird"],
+      },
+    ])
+  })
+
+  it("a stale token points at a fresh plan without --confirm", async () => {
+    const result = lines(
+      (await invoke(["task", "create", "Fresh", "--confirm", "plan_0000000000000000"])).stdout,
+    )[0]!
+    expect(result.error.code).toBe("stale_confirmation")
+    expect(result.next).toEqual([
+      { message: "re-plan against the current state", args: ["task", "create", "Fresh", "--json"] },
+    ])
+  })
+
+  it("an invalid next action is dropped into warnings, never a failure", async () => {
+    const result = lines((await invoke(["counter", "badnext"])).stdout)[0]!
+    expect(result.status).toBe("ok")
+    expect(result.next).toEqual([{ message: "valid", args: ["counter", "list", "--json"] }])
+    expect(result.warnings).toEqual([
+      'dropped next action "bogus": "nonsense" is not a command',
+      'dropped next action "bad flag": flag --nope is not declared for "counter list"',
+    ])
+  })
+
+  it("ndjson terminal events carry next and guides too", async () => {
+    const events = lines(
+      (await invoke(["task", "create", "Fresh", "--yes"], "ndjson")).stdout,
+      "ndjson",
+    )
+    const summary = events.at(-1)!
+    expect(summary.event).toBe("summary")
+    expect(summary.guides).toEqual([])
+    expect(summary.next.length).toBe(1)
+    const conflict = lines(
+      (await invoke(["task", "create", "Seed", "--yes"], "ndjson")).stdout,
+      "ndjson",
+    )
+    expect(conflict.at(-1)!.guides).toEqual(["task-ids", "mutation-replay"])
+  })
+
+  it("text mode renders next: and guide: lines with fixed prefixes", async () => {
+    const result = await invoke(["task", "create", "Fresh", "--yes"], "text")
+    expect(result.stdout).toContain(
+      "next: see the new task in the list: lasso task list --status all --json",
+    )
+    const conflict = await invoke(["task", "create", "Seed", "--yes"], "text")
+    expect(conflict.stderr).toContain("guide: lasso guide get task-ids")
+    expect(conflict.stderr).toContain(
+      "next: see the existing task: lasso task list --status all --json",
+    )
   })
 })

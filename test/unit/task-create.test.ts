@@ -67,6 +67,14 @@ describe("task create plan", () => {
     expect(error.fix).toBeDefined()
   })
 
+  it("rejects a title that derives no identifier", async () => {
+    const error = await Effect.runPromise(
+      taskCreate.plan(input("日本語")).pipe(Effect.flip, Effect.provide(readerWith([]))),
+    )
+    expect(error.code).toBe("invalid_data")
+    expect(error.fix).toContain("ASCII")
+  })
+
   it("conflicts at plan time when the task exists", async () => {
     const error = await Effect.runPromise(
       taskCreate
@@ -101,11 +109,13 @@ describe("task create apply", () => {
         .pipe(Effect.provide(layer)),
     )
     expect(result.created).toBe(false)
-    expect(states.at(-1)!.length).toBe(1)
+    expect(result.task.id).toBe("task_idem")
+    // No write at all: the transform returned null, so the store kept its identity.
+    expect(states.length).toBe(1)
   })
 
   it("reports a conflict when another process created the task after planning", async () => {
-    const { layer } = writerWith([seed("task_x", "X")])
+    const { layer, states } = writerWith([seed("task_x", "X")])
     const error = await Effect.runPromise(
       taskCreate
         .apply({
@@ -115,5 +125,7 @@ describe("task create apply", () => {
         .pipe(Effect.flip, Effect.provide(layer)),
     )
     expect(error.code).toBe("resource_conflict")
+    // A rejected mutation performs no write at all.
+    expect(states.length).toBe(1)
   })
 })

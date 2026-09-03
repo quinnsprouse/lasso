@@ -1,5 +1,7 @@
 import type { Effect, Schema } from "effect"
 import type { AppError, ErrorCode } from "../errors.ts"
+import type { GuideTopic } from "../guides/catalog.generated.ts"
+import type { NextAction } from "../output/guidance.ts"
 
 /**
  * The CommandContract is the single source of truth for the CLI surface.
@@ -115,6 +117,13 @@ interface ContractBase<P extends Record<string, ParamSpec>> {
   /** Domain error codes this command can produce. Framework codes are added automatically. */
   readonly domainErrorCodes: ReadonlyArray<ErrorCode>
   readonly examples: ReadonlyArray<Example>
+  /**
+   * Guide topics an agent should read before using this command: the models
+   * the surface cannot express (id derivation, replay semantics). Advertised
+   * by describe, offered on this command's outcomes. The catalog's per-topic
+   * command list is derived from these declarations.
+   */
+  readonly guides?: ReadonlyArray<GuideTopic>
 }
 
 interface Collection {
@@ -136,6 +145,15 @@ export interface QueryContract<
   readonly renderText?: (data: A) => string
   /** Declare for collection outputs: enables NDJSON item events and --fields. */
   readonly collection?: Collection
+  /**
+   * The agent's next move(s) after a success: pure, synchronous, at most
+   * three, each an argv for this binary. The runtime validates them against
+   * the surface. Runtime-owned flows (confirmation, dry run) never call this.
+   */
+  readonly next?: (context: {
+    readonly input: InputOf<P>
+    readonly data: A
+  }) => ReadonlyArray<NextAction>
 }
 
 export interface MutationContract<
@@ -158,6 +176,11 @@ export interface MutationContract<
   readonly apply: (plan: Plan) => Effect.Effect<A, AppError, RApply>
   readonly renderText?: (data: A) => string
   readonly renderPlanText?: (plan: Plan) => string
+  /** Next move(s) after a successful apply; see QueryContract.next. */
+  readonly next?: (context: {
+    readonly input: InputOf<P>
+    readonly data: A
+  }) => ReadonlyArray<NextAction>
 }
 
 // biome-ignore format: readability
@@ -169,8 +192,6 @@ export interface Capabilities {
   readonly mutates: boolean
   readonly supportsDryRun: boolean
   readonly idempotency: Idempotency
-  readonly interactive: boolean
-  readonly mcpEligible: boolean
 }
 
 export const capabilitiesOf = (contract: AnyContract): Capabilities =>
@@ -179,15 +200,11 @@ export const capabilitiesOf = (contract: AnyContract): Capabilities =>
         mutates: true,
         supportsDryRun: true,
         idempotency: contract.idempotency,
-        interactive: false,
-        mcpEligible: true,
       }
     : {
         mutates: false,
         supportsDryRun: false,
         idempotency: { kind: "always" },
-        interactive: false,
-        mcpEligible: true,
       }
 
 export const defineQuery = <const P extends Record<string, ParamSpec>, A, R = never>(

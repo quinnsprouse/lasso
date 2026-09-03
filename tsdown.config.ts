@@ -21,9 +21,11 @@ export default defineConfig({
   dts: false,
   sourcemap: false,
   // publint itself shells out to `npm pack`; when tsdown runs inside a pack
-  // lifecycle (prepack), that recursion breaks — so prepack skips it. The
-  // Push/CI builds run with publint on.
-  publint: process.env["TSDOWN_SKIP_PUBLINT"] === undefined,
+  // lifecycle (prepack), that recursion breaks — so prepack skips it. npm
+  // sets npm_lifecycle_event, which works on every platform (no inline
+  // VAR=1 assignment, which Windows shells reject). Push/CI builds run with
+  // publint on.
+  publint: process.env["npm_lifecycle_event"] !== "prepack",
   attw: false,
   outDir: "dist",
 })

@@ -1,20 +1,23 @@
 # Toolchain-owned git hooks. `npm run setup` (lefthook install) restores them
-# after a fresh clone or a late `git init`.
+# after a fresh clone or a late `git init`. Tools run as `node <package entry>`
+# from node_modules — never npx, which would fetch a same-named package from
+# the registry when the install is missing.
 pre-commit:
-  parallel: true
+  # Sequential: lint must see the formatted file, not the pre-format staged content.
+  parallel: false
   jobs:
     - name: format staged
-      glob: "*.{ts,mjs,json,md}"
-      run: npx biome format --write --no-errors-on-unmatched {staged_files}
+      glob: "*.{ts,mjs,cjs,json}"
+      run: node node_modules/@biomejs/biome/bin/biome format --write --no-errors-on-unmatched {staged_files}
       stage_fixed: true
     - name: lint staged
-      glob: "*.{ts,mjs}"
-      run: npx oxlint --type-aware --deny-warnings {staged_files}
+      glob: "*.{ts,mjs,cjs}"
+      run: node node_modules/oxlint/bin/oxlint --type-aware --deny-warnings {staged_files}
 
 commit-msg:
   jobs:
     - name: commitlint
-      run: npx commitlint --edit {1}
+      run: node node_modules/@commitlint/cli/cli.js --edit {1}
 
 pre-push:
   jobs:

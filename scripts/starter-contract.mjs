@@ -5,12 +5,14 @@
 //
 // Failures preserve the temp directory and print its path as evidence.
 import { execFileSync, execSync } from "node:child_process"
-import { existsSync, mkdtempSync, rmSync } from "node:fs"
+import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
+import { assertWorkspace } from "./lib/toolchain.mjs"
 
-const root = process.cwd()
-const work = mkdtempSync(join(tmpdir(), "lasso-contract-"))
+const root = assertWorkspace()
+const binName = Object.keys(JSON.parse(readFileSync(join(root, "package.json"), "utf8")).bin)[0]
+const work = mkdtempSync(join(tmpdir(), "starter-contract-"))
 let failed = false
 
 const step = (name, fn) => {
@@ -68,12 +70,14 @@ step("clean start: archive installs with the frozen lockfile", () => {
 
 step("git tooling: hooks install and commit messages are enforced", () => {
   sh("git init --initial-branch=main -q && git add -A")
-  sh("npx lefthook install")
-  sh('git -c user.email=contract@lasso.dev -c user.name=contract commit -q -m "chore: seed"')
+  sh("node node_modules/lefthook/bin/index.js install")
+  sh(
+    'git -c user.email=contract@lasso.dev -c user.name=contract -c commit.gpgsign=false commit -q -m "chore: seed"',
+  )
   let rejected = false
   try {
     sh(
-      'git -c user.email=contract@lasso.dev -c user.name=contract commit -q --allow-empty -m "bad message"',
+      'git -c user.email=contract@lasso.dev -c user.name=contract -c commit.gpgsign=false commit -q --allow-empty -m "bad message"',
     )
   } catch {
     rejected = true
@@ -92,7 +96,7 @@ step("doctor: a fresh workspace reports healthy", () => {
 })
 
 step("build: the template produces the shipped artifact", () => {
-  sh("npx tsdown")
+  sh("npm run build")
 })
 
 step("introspection works with no auth, network, config, or state", () => {
@@ -138,6 +142,40 @@ step("confirmation protocol: exit 4, then confirmArgs completes the plan", () =>
   const second = JSON.parse(runBin(envelope.confirmation.confirmArgs))
   if (second.data.created !== true) {
     throw new Error("confirmArgs replay did not apply the plan")
+  }
+})
+
+step("guidance journey: a missing-model error points at its guide and its next move works", () => {
+  // Provoke a real id collision: two titles that normalize to the same id.
+  runBin(["task", "create", "Ship the kit", "--yes", "--json"])
+  const conflict = runBinExpectFail(["task", "create", "  Ship: the KIT!  ", "--yes", "--json"], 73)
+  const envelope = JSON.parse(conflict.stdout.trim())
+  if (envelope.error.code !== "resource_conflict") {
+    throw new Error(`expected resource_conflict, got ${envelope.error.code}`)
+  }
+  if (!Array.isArray(envelope.guides) || !envelope.guides.includes("task-ids")) {
+    throw new Error("a normalization collision must point at the task-ids guide")
+  }
+  const guide = JSON.parse(runBin(["guide", "get", envelope.guides[0], "--json"]))
+  if (
+    guide.status !== "ok" ||
+    typeof guide.data.content !== "string" ||
+    guide.data.content.length < 300
+  ) {
+    throw new Error("guide get did not return the topic body")
+  }
+  if (!Array.isArray(envelope.next) || envelope.next.length === 0) {
+    throw new Error("a conflict must carry an executable next action")
+  }
+  // The first next action must be a valid invocation of this binary.
+  const next = JSON.parse(runBin(envelope.next[0].args))
+  if (next.status !== "ok") {
+    throw new Error(`the first next action failed: ${JSON.stringify(next)}`)
+  }
+  // Every terminal envelope carries next and guides arrays.
+  const list = JSON.parse(runBin(["task", "list", "--json"]))
+  if (!Array.isArray(list.next) || !Array.isArray(list.guides)) {
+    throw new Error("ok envelopes must carry next and guides")
   }
 })
 
@@ -188,7 +226,7 @@ step("rename journey: the renamed template stays green", () => {
   sh("node scripts/rename.mjs acme-cli")
   sh("npm run check")
   const renamedDescribe = JSON.parse(
-    execFileSync("node", ["--experimental-strip-types", "src/bin.ts", "describe", "--json"], {
+    execFileSync("node", ["src/bin.ts", "describe", "--json"], {
       cwd: work,
       encoding: "utf8",
     }),
@@ -196,13 +234,13 @@ step("rename journey: the renamed template stays green", () => {
   if (renamedDescribe.data.cli.name !== "acme-cli") {
     throw new Error("describe still reports the old CLI name after rename")
   }
-  sh("node scripts/rename.mjs lasso")
+  sh(`node scripts/rename.mjs ${binName}`)
   sh("npm run check")
 })
 
 step("release hygiene: the pack contains only intended files", () => {
   const files = JSON.parse(sh("npm pack --dry-run --json"))[0].files.map((f) => f.path)
-  const allowed = /^(bin\/|dist\/|package\.json$|README\.md$|LICENSE$)/
+  const allowed = /^(bin\/|dist\/|skills\/|package\.json$|README\.md$|LICENSE$)/
   const unexpected = files.filter((file) => !allowed.test(file))
   if (unexpected.length > 0) {
     throw new Error(`unexpected files in the pack: ${unexpected.join(", ")}`)

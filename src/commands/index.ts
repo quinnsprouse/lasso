@@ -1,5 +1,6 @@
 import type { MutationContract, QueryContract } from "../contract/contract.ts"
 import type { ApplyServices, PlanServices, QueryServices } from "../services/index.ts"
+import { makeGuideCommands } from "./guide.ts"
 import { makeIntrospection } from "./introspection.ts"
 import { taskAudit } from "./task-audit.ts"
 import { taskCreate } from "./task-create.ts"
@@ -17,6 +18,7 @@ export type RosterContract =
   | MutationContract<any, any, any, PlanServices, ApplyServices>
 
 const introspection = makeIntrospection(() => contracts)
+const guide = makeGuideCommands(() => contracts)
 
 /**
  * The explicit command roster — the single registry. Adding a command means:
@@ -30,5 +32,7 @@ export const contracts: ReadonlyArray<RosterContract> = [
   taskCreate,
   introspection.describe,
   introspection.schema,
+  guide.list,
+  guide.get,
   // generator:contracts — scripts/new-command.mjs inserts above this line
 ]

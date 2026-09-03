@@ -12,6 +12,7 @@ import { renderOutcome } from "./outcome.ts"
  */
 
 const decodeProgress = Schema.decodeUnknownSync(ProgressEvent)
+const encodeProgressLine = Schema.encodeSync(Schema.fromJsonString(ProgressEvent))
 
 /** Progress input; `completed` and `total` must appear together. */
 export interface ProgressUpdate {
@@ -29,8 +30,6 @@ export interface RendererApi {
    * on stdout. JSON and text: a stderr line — stdout stays terminal-only.
    */
   progress(update: ProgressUpdate): Effect.Effect<void, PlatformError.PlatformError>
-  /** Diagnostic line — always stderr, never stdout. */
-  note(message: string): Effect.Effect<void, PlatformError.PlatformError>
 }
 
 export class Renderer extends Context.Service<Renderer, RendererApi>()("lasso/output/Renderer") {
@@ -53,45 +52,49 @@ export class Renderer extends Context.Service<Renderer, RendererApi>()("lasso/ou
             ),
           )
 
-        const progress = (update: ProgressUpdate) => {
-          if (terminated) {
-            return Effect.die(new Error("progress after the terminal event"))
-          }
-          // One shared contract: the same schema that types the wire event
-          // validates every report (kebab phase, counter pairing, bounds).
-          let event: ProgressEvent
-          try {
-            event = decodeProgress({
-              event: "progress",
-              phase: update.phase,
-              message: update.message,
-              ...(update.completed !== undefined ? { completed: update.completed } : {}),
-              ...(update.total !== undefined ? { total: update.total } : {}),
-            })
-          } catch (cause) {
-            return Effect.die(cause)
-          }
-          if (mode.format === "ndjson") {
-            return writeTo("stdout", `${JSON.stringify(event)}\n`)
-          }
-          const counter =
-            event.completed !== undefined ? ` (${event.completed}/${event.total})` : ""
-          return writeTo("stderr", `progress[${event.phase}]: ${event.message}${counter}\n`)
-        }
+        // Both latch checks run inside Effect.suspend, i.e. when the effect
+        // EXECUTES, not when the handler builds it. A progress effect that a
+        // handler constructed early and ran late still hits the latch.
+        const progress = (update: ProgressUpdate) =>
+          Effect.suspend(() => {
+            if (terminated) {
+              return Effect.die(new Error("progress after the terminal event"))
+            }
+            // One shared contract: the same schema that types the wire event
+            // validates every report (kebab phase, counter pairing, bounds).
+            let event: ProgressEvent
+            try {
+              event = decodeProgress({
+                event: "progress",
+                phase: update.phase,
+                message: update.message,
+                ...(update.completed !== undefined ? { completed: update.completed } : {}),
+                ...(update.total !== undefined ? { total: update.total } : {}),
+              })
+            } catch (cause) {
+              return Effect.die(cause)
+            }
+            if (mode.format === "ndjson") {
+              return writeTo("stdout", `${encodeProgressLine(event)}\n`)
+            }
+            const counter =
+              event.completed !== undefined ? ` (${event.completed}/${event.total})` : ""
+            return writeTo("stderr", `progress[${event.phase}]: ${event.message}${counter}\n`)
+          })
 
         return Renderer.of({
           mode,
-          emit: (outcome) => {
-            if (terminated) {
-              return Effect.die(new Error("emit after the terminal event"))
-            }
-            terminated = true
-            return Effect.forEach(renderOutcome(mode, binName, outcome), (write) =>
-              writeTo(write.stream, write.text),
-            ).pipe(Effect.asVoid)
-          },
+          emit: (outcome) =>
+            Effect.suspend(() => {
+              if (terminated) {
+                return Effect.die(new Error("emit after the terminal event"))
+              }
+              terminated = true
+              return Effect.forEach(renderOutcome(mode, binName, outcome), (write) =>
+                writeTo(write.stream, write.text),
+              ).pipe(Effect.asVoid)
+            }),
           progress,
-          note: (message) => writeTo("stderr", `${message}\n`),
         })
       }),
     )

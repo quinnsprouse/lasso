@@ -5,15 +5,19 @@ Lasso is a starter kit for CLIs whose primary user is an AI agent — the agent 
 ## Language
 
 **CommandContract**:
-The single declaration of a command: name, params, schemas, error codes, examples, capabilities, handler. The parser, help, `describe`, JSON Schema, and docs are generated from it or validated against it.
+The single declaration of a command: name, params, schemas, error codes, examples, handler. Capabilities derive from its kind. The parser, help, `describe`, JSON Schema, and the Surface Snapshot are generated from it or validated against it.
 _Avoid_: command definition, command config
 
 **Output Protocol**:
-The frozen machine surface: envelopes with `schemaVersion`, the exit-code registry, NDJSON events, and the confirmation flow. Changes are additive only.
+The frozen machine surface: envelopes with `schemaVersion`, the exit-code registry, NDJSON events, and the confirmation flow. Changes are additive only by policy, and the Surface Snapshot feeds the structural comparator that enforces the cases it can classify.
 _Avoid_: output format, JSON mode
 
+**Surface Snapshot**:
+The recorded `describe` and `schema` payloads in `test/contract/surface.snapshot.json`. The compatibility test fails when anything recorded is removed or changed, when an input parameter or schema member becomes required or gains a constraint or default, when an output schema promises less or may produce more (a dropped required member, a grown `enum`), and when the surface gained something not yet recorded. Prose (`description`, `summary`, `examples`) is informational. `npm run surface:update` records additions and refuses breaking changes unless `--allow-breaking` is passed after human review (a genuine break also bumps `schemaVersion`); the diff is the review.
+_Avoid_: golden file, fixture
+
 **Plan/Apply Split**:
-The shape of every mutation. `plan` derives intent without side effects; `apply` executes exactly one confirmed plan and never sees the input. Plans are deterministic for identical state and input, so apply-assigned metadata stays out of them.
+The shape of every mutation. `plan` derives intent without side effects; the runtime encodes it through `planSchema`, previews and hashes that encoding, and `apply` executes exactly one confirmed plan — its decoded form — and never sees the input. Plans are deterministic for identical state and input, so apply-assigned metadata stays out of them.
 _Avoid_: two-phase commit, preview mode
 
 **Capability Split**:
@@ -21,26 +25,43 @@ The service sets by contract role: queries and plans get read services, applies 
 _Avoid_: permissions, access control
 
 **Confirmation Token**:
-The hash that binds `{command, schemaVersion, plan}` to a confirmation. A changed plan invalidates the token, so an agent can never apply a plan it did not preview.
+The hash that binds `{command, schemaVersion, plan}` to a confirmation. A changed plan invalidates the token, so a `--confirm` replay can never apply a plan that differs from the one previewed. `--yes` is the explicit opt-out of previewing.
 _Avoid_: nonce, session token
 
 **Verification Profile**:
-A named depth of checking. Fast is format, lint, types, Effect diagnostics, and unit tests. Push adds build, dead code, e2e, and pack smoke. CI adds coverage and the Starter Contract. Each contains the previous, and local and CI run identical commands.
+A named depth of checking. Fast is format, lint, types, Effect diagnostics, test hygiene, guide-catalog freshness, and the unit and contract tests. Push adds build, dead code, e2e, and pack smoke. CI adds coverage and the Starter Contract. Each contains the previous. One definition in `scripts/verify.mjs` drives all three: the pre-push hook runs Push, CI runs CI, so a green Push locally means the same steps pass in CI.
 _Avoid_: test suite, pipeline
 
 **Starter Contract**:
-The self-test that proves a fresh archive of the template delivers every advertised guarantee: install, hooks, build, protocol behavior, generator round-trip, rename journey, pack hygiene.
+The self-test that proves a fresh archive of the template delivers every advertised guarantee: install, hooks, doctor, build, protocol behavior, the guidance journey, generator scaffold, rename journey, pack hygiene.
 _Avoid_: smoke test, template test
 
-**Renderer Monopoly**:
-Only the Renderer writes stdout; diagnostics go to stderr. Lint enforces it and e2e asserts it.
-_Avoid_: output helper, print function
+**Point-of-use Guidance**:
+Every terminal outcome carries `next` (executable next moves as argv, validated against the surface) and `guides` (topic ids); error outcomes also carry the required `fix` sentence. Point-of-use guidance outranks documents: an error with a complete fix declares no topics of its own (it still inherits its command's).
+_Avoid_: hints, tips, suggestions
+
+**Guide Topic**:
+An authored Markdown model in `guides/topics/`, served by the binary through `guide get`, for knowledge the command surface cannot express. Admitted only when an agent mid-task would fetch it to build a model. Declared by the contracts that need it; inlined into the committed `src/guides/catalog.generated.ts` by `node scripts/guides.mjs`, so the bundle carries exactly the topics its version was built with.
+_Avoid_: doc, help page, skill reference
+
+**Shipped Skill**:
+`skills/<bin>/SKILL.md`, the only guidance in an agent's context before its first command: the safety contract and a router of intents to first moves and guide topics. Size-budgeted, and it names topics, never teaches them.
+_Avoid_: prompt, system instructions
+
+**Output Authority**:
+`renderOutcome` defines every application outcome write in every format. The Renderer emits it inside Effect and `src/bin.ts` writes it at the process boundary. In machine formats the parser adapter's shim passes exactly one parser line (`--version`, in the negotiated format) to stdout and routes every other console write to stderr; text-mode parser help and version output stay parser-owned. Lint bans `Console`, `process`, and `console` in `src/` outside those process-boundary files; the runtime and e2e tests assert machine-mode stdout purity.
+_Avoid_: renderer monopoly, output helper, print function
+
+**Agent Guards**:
+The Claude Code hooks in `.claude/hooks/`: the guard refuses the common actions that bypass the gates before a Bash, Edit, or Write call; the post-edit hook reports file-type-dependent format, lint, type, and Effect diagnostics after an Edit or Write; the session-start hook prints the doctor's failing checks; the stop hook refuses to end a turn on a red tree. A speed bump for an agent, not a sandbox.
+_Avoid_: linter, pre-commit
 
 ## Relationships
 
 - The **CommandContract** generates the surfaces; the **Output Protocol** constrains what they emit.
 - The **Plan/Apply Split** and the **Confirmation Token** make mutations previewable and replay-safe; the **Capability Split** makes the plan side read-only at compile time.
-- The **Verification Profiles** check the contracts; the **Starter Contract** checks the template itself.
+- **Point-of-use Guidance** answers a missing value at the moment it matters; a **Guide Topic** answers a missing model when the outcome names it; the **Shipped Skill** routes an intent to the right topic before the first command.
+- The **Verification Profiles** check the contracts; the **Surface Snapshot** checks the protocol's history; the **Starter Contract** checks the template itself; the **Agent Guards** keep an agent inside all three while it edits.
 
 ## Example dialogue
 
@@ -54,4 +75,4 @@ _Avoid_: output helper, print function
 >
 > Developer: "How does an agent learn the flag names without reading the source?"
 >
-> Domain expert: "It runs `describe --json`. If that answer could drift from the parser, the contract-invariant tests in the Fast Profile would fail."
+> Domain expert: "It runs `describe --json`. The parser and `describe` are both generated from the same CommandSurface, so they cannot disagree, and the runtime tests drive the real parser to prove it."

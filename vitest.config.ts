@@ -12,10 +12,10 @@ export default defineConfig({
       // suite's composition changes (e.g. moving tests between profiles),
       // never to make a failing change pass.
       thresholds: {
-        lines: 90,
-        statements: 90,
-        functions: 85,
-        branches: 82,
+        lines: 91,
+        statements: 91,
+        functions: 92,
+        branches: 84,
       },
     },
   },

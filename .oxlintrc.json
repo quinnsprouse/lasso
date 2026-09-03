@@ -29,11 +29,16 @@
           },
           {
             "name": "node:process",
-            "message": "Only src/bin.ts touches the process; commands get services."
+            "message": "Only src/bin.ts (and the adapter's output shim) touch the process; commands get services."
           },
           {
             "name": "effect/unstable/cli",
             "message": "Only src/contract/adapter.ts may import the parser \u2014 commands are defined as contracts."
+          },
+          {
+            "name": "effect",
+            "importNames": ["Console"],
+            "message": "Console bypasses the output protocol. Narrate through the Progress service; only the Renderer writes stdout."
           }
         ]
       }
@@ -42,7 +47,7 @@
       "error",
       {
         "name": "process",
-        "message": "Only src/bin.ts touches the process; commands get services."
+        "message": "Only src/bin.ts (and the adapter's output shim) touch the process; commands get services."
       }
     ]
   },
@@ -83,7 +88,7 @@
               },
               {
                 "name": "node:process",
-                "message": "Only src/bin.ts touches the process."
+                "message": "Only src/bin.ts (and the adapter's output shim) touch the process."
               }
             ]
           }

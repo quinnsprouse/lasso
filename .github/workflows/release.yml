@@ -1,9 +1,12 @@
 name: release
 
-# npm trusted publishing (OIDC): configure this repository + workflow as a
-# trusted publisher for the package on npmjs.com, and no NPM_TOKEN is needed —
-# provenance attestations are generated automatically. Provenance requires the
-# `repository` field in package.json to match this repo.
+# npm trusted publishing (OIDC): once the package exists on npmjs.com,
+# configure this repository + workflow as its trusted publisher and no
+# NPM_TOKEN is needed — provenance attestations are generated automatically.
+# npm cannot register a trusted publisher for a package that has never been
+# published, so the FIRST release is published from a terminal (see
+# CONTRIBUTING.md, Releasing); every release after that goes through here.
+# Provenance requires the `repository` field in package.json to match this repo.
 on:
   push:
     tags: ["v*"]
@@ -13,15 +16,23 @@ permissions:
   id-token: write
   attestations: write
 
+# One release at a time; a second tag waits for the first to finish.
+concurrency:
+  group: release
+  cancel-in-progress: false
+
 jobs:
   publish:
     runs-on: ubuntu-latest
+    # If the npm trusted publisher is configured with a GitHub environment,
+    # declare it here (environment: release) or the OIDC claims will not match.
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: 24
-          cache: npm
+          # No package-manager cache on the release path: the publish must be
+          # built from the registry's bytes, not a cached copy.
           registry-url: https://registry.npmjs.org
       - run: npm ci
       # The tag, package.json, package-lock, and the compiled CLI_VERSION must
@@ -34,18 +45,38 @@ jobs:
             const meta = require('node:fs').readFileSync('src/meta.ts', 'utf8');
             const cliVersion = meta.match(/CLI_VERSION = \"([^\"]+)\"/)[1];
             const tag = process.env.TAG.replace(/^v/, '');
-            if (pkg.version !== tag || lock.version !== tag || cliVersion !== tag) {
-              console.error('version mismatch: tag=' + tag + ' package=' + pkg.version + ' lock=' + lock.version + ' CLI_VERSION=' + cliVersion);
+            const lockRoot = (lock.packages && lock.packages[''] && lock.packages[''].version) || lock.version;
+            if (pkg.version !== tag || lock.version !== tag || lockRoot !== tag || cliVersion !== tag) {
+              console.error('version mismatch: tag=' + tag + ' package=' + pkg.version + ' lock=' + lock.version + '/' + lockRoot + ' CLI_VERSION=' + cliVersion);
               process.exit(1);
             }
           "
         env:
           TAG: ${{ github.ref_name }}
+      # Trusted publishing needs npm >= 11.5.1 on the runner; fail early with the
+      # reason instead of at publish time.
+      - name: verify npm supports trusted publishing
+        run: |
+          node -e "
+            const [major, minor, patch] = require('child_process').execSync('npm --version').toString().trim().split('.').map(Number);
+            const ok = major > 11 || (major === 11 && (minor > 5 || (minor === 5 && patch >= 1)));
+            if (!ok) { console.error('npm ' + major + '.' + minor + '.' + patch + ' is below 11.5.1; trusted publishing needs a newer npm'); process.exit(1); }
+          "
       - run: npm run check:ci
-      # Attest BEFORE publishing: a failed attestation must never leave an
-      # unattested package already public.
-      - name: attest build artifact
+      # The compiled binary must report the tagged version too.
+      - name: verify the binary reports the version
+        run: |
+          test "$(node dist/bin.cjs --version --json | node -e 'process.stdout.write(JSON.parse(require("fs").readFileSync(0,"utf8")).data.version)')" = "${TAG#v}"
+        env:
+          TAG: ${{ github.ref_name }}
+      # Pack once, attest THAT tarball, publish THAT tarball: the attestation
+      # and the published artifact are the same bytes. Attest before publishing
+      # so a failed attestation never leaves an unattested package public.
+      - name: pack
+        id: pack
+        run: echo "tarball=$(npm pack --json | node -e 'process.stdout.write(JSON.parse(require(\"fs\").readFileSync(0,\"utf8\"))[0].filename)')" >> "$GITHUB_OUTPUT"
+      - name: attest the tarball
         uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
         with:
-          subject-path: dist/bin.cjs
-      - run: npm publish
+          subject-path: ${{ steps.pack.outputs.tarball }}
+      - run: npm publish "${{ steps.pack.outputs.tarball }}"

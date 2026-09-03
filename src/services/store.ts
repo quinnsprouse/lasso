@@ -33,8 +33,15 @@ export interface StoreWriterApi {
   ) => Effect.Effect<ReadonlyArray<Task>, AppError>
 }
 
+const DIR = ".lasso"
+const FILE = "tasks.json"
+const LOCK = "tasks.lock"
+
+const WRITE_FIX = `check write permissions on ${DIR}/ in the current directory, or run from a writable directory`
+const READ_FIX = `check read permissions on ${DIR}/${FILE}, or run from the directory that owns the store`
+
 const asCannotWrite = (what: string) => (cause: { message: string }) =>
-  Errors.cannotWrite({ message: `cannot ${what}: ${cause.message}` })
+  Errors.cannotWrite({ message: `cannot ${what}: ${cause.message}`, fix: WRITE_FIX })
 
 const isAlreadyExists = (error: unknown): boolean =>
   typeof error === "object" &&
@@ -45,10 +52,6 @@ const isAlreadyExists = (error: unknown): boolean =>
   "_tag" in error.reason &&
   error.reason._tag === "AlreadyExists"
 
-const DIR = ".lasso"
-const FILE = "tasks.json"
-const LOCK = "tasks.lock"
-
 // Uniquifies temp files within one process; the lock serializes across processes.
 let tmpCounter = 0
 
@@ -57,7 +60,7 @@ const loadFrom = Effect.fn("store.load")(function* (fs: FileSystem.FileSystem, f
     .exists(file)
     .pipe(
       Effect.mapError((cause) =>
-        Errors.cannotWrite({ message: `cannot access ${file}: ${cause.message}` }),
+        Errors.cannotWrite({ message: `cannot access ${file}: ${cause.message}`, fix: READ_FIX }),
       ),
     )
   if (!exists) {
@@ -67,12 +70,12 @@ const loadFrom = Effect.fn("store.load")(function* (fs: FileSystem.FileSystem, f
     .readFileString(file)
     .pipe(
       Effect.mapError((cause) =>
-        Errors.cannotWrite({ message: `cannot read ${file}: ${cause.message}` }),
+        Errors.cannotWrite({ message: `cannot read ${file}: ${cause.message}`, fix: READ_FIX }),
       ),
     )
   const decoded = yield* Schema.decodeEffect(StoreFileJson)(raw).pipe(
     Effect.mapError((cause) =>
-      Errors.config({
+      Errors.invalidConfig({
         message: `${file} is not a valid task store: ${cause.message}`,
         fix: `inspect ${file} and repair or delete it`,
       }),
@@ -123,11 +126,14 @@ export class StoreWriter extends Context.Service<StoreWriter, StoreWriterApi>()(
             }),
             Effect.mapError((error) =>
               isAlreadyExists(error)
-                ? Errors.transient({
+                ? Errors.transientFailure({
                     message: "the task store is locked by another process",
                     fix: `retry; if it persists, remove the stale ${lock} directory`,
                   })
-                : Errors.cannotWrite({ message: `cannot create ${lock}: ${error.message}` }),
+                : Errors.cannotWrite({
+                    message: `cannot create ${lock}: ${error.message}`,
+                    fix: WRITE_FIX,
+                  }),
             ),
           )
         })
@@ -146,7 +152,10 @@ export class StoreWriter extends Context.Service<StoreWriter, StoreWriterApi>()(
                 }
                 const encoded = yield* Schema.encodeEffect(StoreFileJson)({ tasks: next }).pipe(
                   Effect.mapError((cause) =>
-                    Errors.invalidData({ message: `tasks failed to encode: ${cause.message}` }),
+                    Errors.invalidData({
+                      message: `tasks failed to encode: ${cause.message}`,
+                      fix: "this is a bug in the Task schema or the transform; report the command you ran",
+                    }),
                   ),
                 )
                 const stamp = yield* Clock.currentTimeMillis

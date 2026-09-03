@@ -61,9 +61,11 @@ export const negotiate = (options: NegotiateOptions): OutputMode => {
       explicit.push("json")
     } else if (arg === "--no-input") {
       noInput = true
-    } else if (arg === "--help" || arg === "-h") {
+    } else if (/^(--help|-h|--no-help)(=(true|yes|on|1|y|false|no|off|0|n))?$/.test(arg)) {
+      // Every spelling the parser would treat as help (`--help=true`,
+      // `--no-help`, `-h=1`): help is safe, so all of them are help, and the
+      // token never reaches the parser (which prints nothing for some of them).
       helpRequested = true
-      rest.push(arg)
     } else if (arg === "--format") {
       const value = argv[i + 1]
       if (value !== undefined && isFormat(value)) {
