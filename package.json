@@ -1,7 +1,6 @@
 {
-  "name": "lasso",
+  "name": "@quinnsprouse/lasso",
   "version": "0.1.0",
-  "private": false,
   "description": "Agent-first CLI starter kit. Machine surface by default, guardrails that fail mechanically.",
   "type": "module",
   "license": "MIT",
@@ -10,13 +9,15 @@
   },
   "files": [
     "bin",
-    "dist"
+    "dist",
+    "skills"
   ],
   "engines": {
-    "node": ">=22.19"
+    "node": ">=22.19",
+    "npm": ">=10"
   },
   "scripts": {
-    "dev": "node --experimental-strip-types src/bin.ts",
+    "dev": "node src/bin.ts",
     "build": "tsdown",
     "check": "node scripts/verify.mjs fast",
     "check:push": "node scripts/verify.mjs push",
@@ -24,20 +25,19 @@
     "test": "vitest run test/unit test/contract",
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage",
-    "test:contract": "node scripts/starter-contract.mjs",
     "lint": "oxlint --type-aware --deny-warnings",
     "fmt": "biome format --write .",
     "fmt:check": "biome format .",
     "typecheck": "tsc --noEmit",
-    "effect:diagnostics": "effect-tsgo diagnostics --project tsconfig.json --strict",
     "knip": "knip",
     "setup": "lefthook install",
     "test:e2e": "vitest run test/e2e",
-    "prepack": "TSDOWN_SKIP_PUBLINT=1 tsdown --logLevel silent",
-    "setup:skills": "npx skills experimental_install",
+    "prepack": "tsdown --logLevel silent",
     "prepare": "effect-tsgo patch --oxlint",
     "doctor": "node scripts/doctor.mjs",
-    "release:prepare": "node scripts/release.mjs"
+    "release:prepare": "node scripts/release.mjs",
+    "surface:update": "node scripts/surface-snapshot.mjs",
+    "test:starter": "node scripts/starter-contract.mjs"
   },
   "devDependencies": {
     "@biomejs/biome": "2.5.7",
@@ -45,7 +45,7 @@
     "@commitlint/config-conventional": "21.2.0",
     "@effect/platform-node": "4.0.0-beta.106",
     "@effect/tsgo": "0.36.1",
-    "@types/node": "24.3.0",
+    "@types/node": "22.20.1",
     "@vitest/coverage-v8": "4.1.10",
     "effect": "4.0.0-beta.106",
     "execa": "10.0.1",
@@ -62,5 +62,22 @@
   "repository": {
     "type": "git",
     "url": "git+https://github.com/quinnsprouse/lasso.git"
+  },
+  "keywords": [
+    "cli",
+    "effect",
+    "typescript",
+    "ai-agent",
+    "agent-first",
+    "starter-kit",
+    "json",
+    "ndjson"
+  ],
+  "homepage": "https://github.com/quinnsprouse/lasso#readme",
+  "bugs": {
+    "url": "https://github.com/quinnsprouse/lasso/issues"
+  },
+  "publishConfig": {
+    "access": "public"
   }
 }

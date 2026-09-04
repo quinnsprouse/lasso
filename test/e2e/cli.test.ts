@@ -1,20 +1,18 @@
+import { once } from "node:events"
 import { mkdtemp, rm } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
-import { execa } from "execa"
+import { execaNode } from "execa"
 import { afterEach, beforeEach, describe, expect, it } from "vitest"
 
-/**
- * Black-box tests against the BUILT artifact (dist/bin.cjs) — the thing that
- * ships, not the source. Runs in the Push profile, after `tsdown`.
- */
+// Run the built artifact after tsdown, using the same Node executable as the test runner.
 
 const BIN = join(import.meta.dirname, "..", "..", "dist", "bin.cjs")
 
 let cwd: string
 
 const run = (args: ReadonlyArray<string>, options: { env?: Record<string, string> } = {}) =>
-  execa("node", [BIN, ...args], {
+  execaNode(BIN, args, {
     cwd,
     reject: false,
     env: { ...options.env },
@@ -253,5 +251,213 @@ describe("progress through the shipped binary", () => {
     expect(stdoutLines.length).toBe(1)
     expect(JSON.parse(stdoutLines[0]!).status).toBe("ok")
     expect(result.stderr).toContain("progress[load]: reading the task store")
+  })
+})
+
+describe("machine help with a full command line", () => {
+  it.each([
+    ["task", "create"],
+    ["guide", "get"],
+  ])("help for %s %s works before required arguments are known", async (...command) => {
+    await Promise.all(
+      ["json", "ndjson", "text"].map(async (format) => {
+        const result = await run([...command, "--help", "--format", format])
+        expect(result.exitCode).toBe(0)
+        if (format === "json") expect(parse(result.stdout).status).toBe("ok")
+        if (format === "ndjson") expect(parse(result.stdout).event).toBe("summary")
+      }),
+    )
+  })
+
+  it("answers describe data when the named command is followed by flags", async () => {
+    const result = await run(["task", "list", "--status", "all", "--help", "--json"])
+    expect(result.exitCode).toBe(0)
+    expect(parse(result.stdout).data.cli.name).toBe("lasso")
+  })
+
+  it("answers describe data when the named command is followed by a positional", async () => {
+    const result = await run(["task", "create", "ignored title", "--help", "--json"])
+    expect(result.exitCode).toBe(0)
+    expect(parse(result.stdout).status).toBe("ok")
+  })
+
+  it("does not mask an unknown flag placed before the command path", async () => {
+    const result = await run(["--bogus", "task", "list", "--help", "--json"])
+    expect(result.exitCode).toBe(64)
+    expect(parse(result.stdout).error.message).toContain('unrecognized flag "--bogus"')
+    const between = await run(["task", "--bogus", "list", "--help", "--json"])
+    expect(between.exitCode).toBe(64)
+  })
+
+  it("skips parser-owned global flags when resolving the command path", async () => {
+    const result = await run(["--log-level", "debug", "task", "list", "--help", "--json"])
+    expect(result.exitCode).toBe(0)
+  })
+
+  it("still rejects an unknown leaf under a known group", async () => {
+    const result = await run(["task", "bogus", "--help", "--json"])
+    expect(result.exitCode).toBe(64)
+    expect(parse(result.stdout).error.message).toContain('unknown command "task bogus"')
+  })
+})
+
+describe("task audit failure path", () => {
+  it("a corrupt store is invalid_config with exit 78 and a repair fix", async () => {
+    const { mkdir, writeFile } = await import("node:fs/promises")
+    await mkdir(join(cwd, ".lasso"), { recursive: true })
+    await writeFile(join(cwd, ".lasso", "tasks.json"), "{ not json")
+    const result = await run(["task", "audit", "--json"])
+    expect(result.exitCode).toBe(78)
+    const envelope = parse(result.stdout)
+    expect(envelope.error.code).toBe("invalid_config")
+    expect(envelope.error.fix).toContain("tasks.json")
+  })
+})
+
+describe("store identity", () => {
+  it("an --if-not-exists no-op does not rewrite the store file", async () => {
+    const { stat } = await import("node:fs/promises")
+    await run(["task", "create", "Same", "--yes", "--json"])
+    const before = await stat(join(cwd, ".lasso", "tasks.json"))
+    const result = await run(["task", "create", "Same", "--if-not-exists", "--yes", "--json"])
+    expect(result.exitCode).toBe(0)
+    expect(parse(result.stdout).data.created).toBe(false)
+    const after = await stat(join(cwd, ".lasso", "tasks.json"))
+    expect(after.ino).toBe(before.ino)
+    expect(after.mtimeMs).toBe(before.mtimeMs)
+  })
+})
+
+describe("closed stdout", () => {
+  it("a consumer that stops reading gets exit 0 and no stack trace", async () => {
+    const { spawn } = await import("node:child_process")
+    const child = spawn("node", [BIN, "schema", "--json"], {
+      cwd,
+      stdio: ["ignore", "pipe", "pipe"],
+    })
+    // Close our end immediately: the producer's writes hit EPIPE.
+    child.stdout.destroy()
+    let stderr = ""
+    child.stderr.setEncoding("utf8")
+    child.stderr.on("data", (chunk: string) => {
+      stderr += chunk
+    })
+    const [code] = (await once(child, "close")) as [number | null]
+    expect(code).toBe(0)
+    expect(stderr).not.toContain("EPIPE")
+    expect(stderr).not.toContain("Unhandled")
+  })
+})
+
+describe("global flags in machine formats", () => {
+  it("--completions=<shell> with an explicit machine format is a usage error, not a raw script", async () => {
+    const result = await run(["--completions=zsh", "--json"])
+    expect(result.exitCode).toBe(64)
+    expect(parse(result.stdout).error.code).toBe("invalid_usage")
+  })
+
+  it("help does not mask an invalid or missing --log-level value", async () => {
+    const bogus = await run(["--log-level=bogus", "task", "list", "--help", "--json"])
+    expect(bogus.exitCode).toBe(64)
+    expect(parse(bogus.stdout).error.message).toContain("--log-level")
+    const missing = await run(["--log-level", "--help", "--json"])
+    expect(missing.exitCode).toBe(64)
+    const trailing = await run(["task", "list", "--log-level=DEBUG", "--help", "--json"])
+    expect(trailing.exitCode).toBe(64)
+  })
+})
+
+describe("guides and guidance through the shipped binary", () => {
+  it("guide list and guide get work offline with no state", async () => {
+    const list = await run(["guide", "list", "--json"])
+    expect(list.exitCode).toBe(0)
+    const topics = parse(list.stdout).data.items.map((item: any) => item.topic)
+    expect(topics).toContain("task-ids")
+    const got = await run(["guide", "get", "task-ids", "--json"])
+    expect(parse(got.stdout).data.content).toContain("# How task ids are derived")
+    expect(parse(got.stdout).data.commands).toEqual(["task create", "task list"])
+    const brief = await run(["guide", "get", "task-ids", "--brief", "--json"])
+    expect(parse(brief.stdout).data.content).toBeUndefined()
+    const missing = await run(["guide", "get", "nope", "--json"])
+    expect(missing.exitCode).toBe(65)
+    expect(parse(missing.stdout).next).toEqual([
+      { message: "list the topics", args: ["guide", "list", "--json"] },
+    ])
+  })
+
+  it("describe advertises guides and can be narrowed to one command", async () => {
+    const full = await run(["describe", "--json"])
+    const doc = parse(full.stdout).data
+    expect(doc.guideTopics.map((g: any) => g.topic)).toEqual(["mutation-replay", "task-ids"])
+    expect(doc.commands.find((c: any) => c.name === "task create").guides).toEqual([
+      "task-ids",
+      "mutation-replay",
+    ])
+    const one = await run(["describe", "--command", "task list", "--json"])
+    const narrowed = parse(one.stdout).data
+    expect(narrowed.commands.map((c: any) => c.name)).toEqual(["task list"])
+    expect(narrowed.guideTopics.map((g: any) => g.topic)).toEqual(["task-ids"])
+    expect(narrowed.guideTopics[0].commands).toEqual(["task create", "task list"])
+    expect(one.stdout.length).toBeLessThan(12_000)
+    expect(full.stdout.length).toBeLessThan(32_000)
+    const unknown = await run(["describe", "--command", "nope", "--json"])
+    expect(unknown.exitCode).toBe(65)
+  })
+
+  it("a conflict's first next action is executable as-is", async () => {
+    await run(["task", "create", "Ship the kit", "--yes", "--json"])
+    const conflict = await run(["task", "create", "  Ship: the KIT!  ", "--yes", "--json"])
+    expect(conflict.exitCode).toBe(73)
+    const envelope = parse(conflict.stdout)
+    expect(envelope.guides[0]).toBe("task-ids")
+    const followed = await run(envelope.next[0].args)
+    expect(followed.exitCode).toBe(0)
+  })
+})
+
+describe("group help", () => {
+  it("a bare group with --json answers with describe data", async () => {
+    const result = await run(["task", "--json"])
+    expect(result.exitCode).toBe(0)
+    expect(parse(result.stdout).data.cli.name).toBe("lasso")
+  })
+})
+
+describe("action flags in every spelling", () => {
+  it.each(["--help=true", "--no-help", "-h=1"])("%s is help", async (flag) => {
+    const result = await run([flag, "--json"])
+    expect(result.exitCode).toBe(0)
+    expect(parse(result.stdout).data.cli.name).toBe("lasso")
+  })
+
+  it("--help=maybe is not help and --no-completions is not completions", async () => {
+    const help = await run(["--help=maybe", "--json"])
+    expect(help.exitCode).toBe(64)
+    const completions = await run(["--no-completions", "--json"])
+    expect(completions.exitCode).toBe(64)
+    expect(parse(completions.stdout).error.message).not.toContain("raw shell script")
+  })
+
+  it("help never masks a bad flag after the command or a bad completions value", async () => {
+    const after = await run(["task", "list", "--json=true", "--help"])
+    expect(after.exitCode).toBe(64)
+    const prefix = await run(["task", "list", "--helpful", "--help", "--json"])
+    expect(prefix.exitCode).toBe(64)
+    const completions = await run(["--completions=bogus", "--json"])
+    expect(completions.exitCode).toBe(64)
+    expect(parse(completions.stdout).error.message).toContain("--completions")
+  })
+
+  it("--wizard=false in a machine format is still refused", async () => {
+    const result = await run(["--wizard=false", "--json"])
+    expect(result.exitCode).toBe(64)
+    expect(parse(result.stdout).error.code).toBe("invalid_usage")
+  })
+
+  it("a global flag between the group and the leaf keeps runtime guidance", async () => {
+    const result = await run(["task", "--log-level", "debug", "create", "x", "--dry-run", "--json"])
+    expect(result.exitCode).toBe(0)
+    expect(parse(result.stdout).next.length).toBe(1)
+    expect(parse(result.stdout).warnings).toEqual([])
   })
 })

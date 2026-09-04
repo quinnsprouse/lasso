@@ -6,6 +6,7 @@
 import { execFileSync } from "node:child_process"
 import { existsSync, readFileSync, rmSync, writeFileSync } from "node:fs"
 import { join } from "node:path"
+import { ensureInstalled, execTool, repoRoot } from "./lib/toolchain.mjs"
 
 const asJson = process.argv.includes("--json")
 const checks = []
@@ -56,9 +57,22 @@ check("npm version", () => {
   return `npm ${version}`
 })
 
+check("dependencies installed", () => {
+  try {
+    ensureInstalled(repoRoot)
+  } catch (error) {
+    fail(error.message, error.fix)
+  }
+  return "node_modules present"
+})
+
 check("git repository", () => {
   try {
-    execFileSync("git", ["rev-parse", "--git-dir"], { encoding: "utf8", stdio: "pipe" })
+    execFileSync("git", ["rev-parse", "--git-dir"], {
+      cwd: repoRoot,
+      encoding: "utf8",
+      stdio: "pipe",
+    })
   } catch {
     fail("not a git repository", "run: git init --initial-branch=main && npm run setup")
   }
@@ -66,18 +80,25 @@ check("git repository", () => {
 })
 
 check("git hooks installed", () => {
-  const hook = ".git/hooks/pre-commit"
+  const hook = join(repoRoot, ".git", "hooks", "pre-commit")
   if (!existsSync(hook) || !readFileSync(hook, "utf8").includes("lefthook")) {
     fail("lefthook hooks are not installed", "run: npm run setup")
   }
   return "lefthook hooks present"
 })
 
+const installedVersion = (pkg) => {
+  try {
+    return JSON.parse(readFileSync(join(repoRoot, "node_modules", pkg, "package.json"), "utf8"))
+      .version
+  } catch (error) {
+    return fail(`${pkg} is not installed: ${error.message}`, "run: npm ci")
+  }
+}
+
 check("effect versions aligned", () => {
-  const effect = JSON.parse(readFileSync("node_modules/effect/package.json", "utf8")).version
-  const platform = JSON.parse(
-    readFileSync("node_modules/@effect/platform-node/package.json", "utf8"),
-  ).version
+  const effect = installedVersion("effect")
+  const platform = installedVersion("@effect/platform-node")
   if (effect !== platform) {
     fail(
       `effect ${effect} and @effect/platform-node ${platform} are out of lockstep`,
@@ -93,16 +114,13 @@ check("effect oxlint patch active", () => {
   // lives in src/ for the duration of one lint run and is always removed.
   const probe = join("src", `__doctor_probe_${process.pid}__.ts`)
   writeFileSync(
-    probe,
+    join(repoRoot, probe),
     'import { Effect } from "effect"\nexport const f = () => {\n  Effect.succeed(1)\n  return 2\n}\n',
   )
   try {
     const output = (() => {
       try {
-        return execFileSync("npx", ["oxlint", "--type-aware", probe], {
-          encoding: "utf8",
-          stdio: "pipe",
-        })
+        return execTool("oxlint", ["--type-aware", probe], { stdio: "pipe" })
       } catch (error) {
         return `${error.stdout ?? ""}${error.stderr ?? ""}`
       }
@@ -110,21 +128,25 @@ check("effect oxlint patch active", () => {
     if (!output.includes("effecttsgo(floating-effect)")) {
       fail(
         "the effecttsgo oxlint rules are not active — node_modules is unpatched",
-        "run: npx effect-tsgo patch --oxlint (or reinstall: npm ci)",
+        "run: npm run prepare (re-applies the oxlint patch), or reinstall: npm ci",
       )
     }
   } finally {
-    rmSync(probe, { force: true })
+    rmSync(join(repoRoot, probe), { force: true })
   }
   return "effecttsgo rules firing"
 })
 
 check("template identity", () => {
-  const pkg = JSON.parse(readFileSync("package.json", "utf8"))
-  if (pkg.name === "lasso") {
+  const pkg = JSON.parse(readFileSync(join(repoRoot, "package.json"), "utf8"))
+  const binName = Object.keys(pkg.bin)[0]
+  // Spelled in two halves so scripts/rename.mjs (which rewrites every whole
+  // word occurrence of the starter name) leaves this sentinel alone.
+  const starterName = ["las", "so"].join("")
+  if (binName === starterName) {
     return "still the starter identity — run scripts/rename.mjs before publishing"
   }
-  return `renamed to ${pkg.name}`
+  return `renamed to ${binName}`
 })
 
 const failed = checks.filter((entry) => !entry.ok)

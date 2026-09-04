@@ -1,16 +1,18 @@
 import { Schema } from "effect"
 import { ERROR_CATALOG } from "../errors.ts"
+import { GuidanceFields } from "./guidance.ts"
 
 /**
- * The output protocol version. Bump only with a new envelope shape, and keep
- * emitting version "1" behind `--output-version=1` when you do.
+ * The output protocol version. Fields are only ever added within a version;
+ * consumers must ignore members they do not know. Bump only for a new
+ * envelope shape — a breaking change (see AGENTS.md, Changing the surface).
  */
 export const SCHEMA_VERSION = "1"
 
 const ErrorBody = Schema.Struct({
   code: Schema.Literals(Object.keys(ERROR_CATALOG)),
   message: Schema.String,
-  fix: Schema.optional(Schema.String),
+  fix: Schema.String,
   transient: Schema.Boolean,
   details: Schema.optional(Schema.Unknown),
 })
@@ -20,6 +22,7 @@ export const OkEnvelope = Schema.Struct({
   status: Schema.Literal("ok"),
   data: Schema.Unknown,
   warnings: Schema.Array(Schema.String),
+  ...GuidanceFields,
 })
 
 export const ErrorEnvelope = Schema.Struct({
@@ -27,6 +30,7 @@ export const ErrorEnvelope = Schema.Struct({
   status: Schema.Literal("error"),
   error: ErrorBody,
   warnings: Schema.Array(Schema.String),
+  ...GuidanceFields,
 })
 
 export const ConfirmationEnvelope = Schema.Struct({
@@ -41,6 +45,7 @@ export const ConfirmationEnvelope = Schema.Struct({
     confirmCommand: Schema.String,
   }),
   warnings: Schema.Array(Schema.String),
+  ...GuidanceFields,
 })
 
 export type OkEnvelope = typeof OkEnvelope.Type
@@ -50,7 +55,8 @@ export type ConfirmationEnvelope = typeof ConfirmationEnvelope.Type
 /**
  * NDJSON stream events. Zero or more `progress` events may precede the
  * terminal; every stream still ends with exactly one terminal event:
- * `summary`, `confirmation_required`, or `error`.
+ * `summary`, `confirmation_required`, or `error`. Terminal events carry the
+ * same `next` and `guides` as their envelope counterparts.
  */
 const KEBAB_CASE = /^[a-z][a-z0-9]*(-[a-z0-9]+)*$/
 
@@ -85,7 +91,7 @@ export const StreamEvent = Schema.Union([
   Schema.Struct({ event: Schema.Literal("item"), data: Schema.Unknown }),
   Schema.Struct({ event: Schema.Literal("warning"), message: Schema.String }),
   ProgressEvent,
-  Schema.Struct({ event: Schema.Literal("summary"), data: Schema.Unknown }),
+  Schema.Struct({ event: Schema.Literal("summary"), data: Schema.Unknown, ...GuidanceFields }),
   Schema.Struct({
     event: Schema.Literal("confirmation_required"),
     plan: Schema.Unknown,
@@ -94,8 +100,9 @@ export const StreamEvent = Schema.Union([
       confirmArgs: Schema.Array(Schema.String),
       confirmCommand: Schema.String,
     }),
+    ...GuidanceFields,
   }),
-  Schema.Struct({ event: Schema.Literal("error"), error: ErrorBody }),
+  Schema.Struct({ event: Schema.Literal("error"), error: ErrorBody, ...GuidanceFields }),
 ])
 
 export type StreamEvent = typeof StreamEvent.Type

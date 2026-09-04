@@ -18,6 +18,7 @@ export const taskList = defineQuery({
   },
   dataSchema: TaskList,
   domainErrorCodes: ["invalid_config", "cannot_write"],
+  guides: ["task-ids"],
   examples: [
     {
       command: "lasso task list --status all --json",

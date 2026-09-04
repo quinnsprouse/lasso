@@ -3,6 +3,9 @@ import type { SchemaAST } from "effect"
 import type { AnyContract } from "./contract.ts"
 import type { CommandSurface, SurfaceParam } from "./surface.ts"
 import { errorCatalogTable, surfaceOf } from "./surface.ts"
+import { guideInventory } from "../guides/catalog.ts"
+import type { GlobalFlag } from "./invocation.ts"
+import { GLOBAL_FLAGS } from "./invocation.ts"
 import { ExitCode } from "../output/exit.ts"
 import {
   ConfirmationEnvelope,
@@ -54,6 +57,13 @@ const standaloneSchema = (ast: SchemaAST.AST): Record<string, unknown> => {
   }
 }
 
+const describeGlobalFlag = (flag: GlobalFlag) => ({
+  cliName: flag.cliName,
+  ...(flag.alias !== undefined ? { alias: flag.alias } : {}),
+  description: flag.description,
+  ...(flag.values !== undefined ? { values: [...flag.values] } : {}),
+})
+
 const describeParam = (param: SurfaceParam) => ({
   key: param.key,
   cliName: param.cliName,
@@ -76,61 +86,39 @@ const describeSurface = (surface: CommandSurface) => ({
   resultVariants: surface.resultVariants,
   errorCodes: surface.errorCodes,
   examples: [...surface.contract.examples],
+  guides: surface.guides,
 })
 
 export const describeCli = (options: {
   readonly binName: string
   readonly version: string
   readonly contracts: ReadonlyArray<AnyContract>
+  /**
+   * Restrict the inventory to one command (describe --command): only that
+   * command and the guide topics it references, for agents budgeting context.
+   */
+  readonly only?: string
 }) => ({
   schemaVersion: SCHEMA_VERSION,
   cli: { name: options.binName, version: options.version },
   protocol: {
     formats: ["json", "text", "ndjson"],
-    globalFlags: [
-      { cliName: "--json", description: "Output a JSON envelope" },
-      { cliName: "--format", description: "Output format: auto | json | text | ndjson" },
-      {
-        cliName: "--no-input",
-        description: "Never wait for input (this CLI never prompts; accepted for compatibility)",
-      },
-      { cliName: "--help", description: "In machine formats, answers with this describe payload" },
-      { cliName: "--version", description: "CLI version (envelope or summary event)" },
-      { cliName: "--log-level", description: "Runtime log level (diagnostics go to stderr)" },
-      { cliName: "--wizard", description: "Interactive wizard — text mode on a terminal only" },
-      {
-        cliName: "--completions",
-        description: "Print a shell completion script — text mode only",
-      },
-    ],
-    flagSpellings: "Boolean flags also accept a --no-<name> negated form.",
-    envelope: {
-      ok: { schemaVersion: "string", status: "ok", data: "…", warnings: ["…"] },
-      error: {
-        schemaVersion: "string",
-        status: "error",
-        error: {
-          code: "string",
-          message: "string",
-          fix: "string?",
-          transient: "boolean",
-          details: "unknown?",
-        },
-        warnings: ["…"],
-      },
-      confirmationRequired: {
-        schemaVersion: "string",
-        status: "confirmation_required",
-        plan: "…",
-        confirmation: { token: "string", confirmArgs: ["…"], confirmCommand: "string" },
-        warnings: ["…"],
-      },
+    globalFlags: GLOBAL_FLAGS.map(describeGlobalFlag),
+    flagSpellings: "Boolean flags also accept a --no-<name> negated form and --<name>=true|false.",
+    // Envelope and event shapes: see `schema --json` (protocol.envelopes, protocol.streamEvent).
+    guidance: {
+      next: "Executable next moves as argv for this binary (no bin name), importance-ordered, at most 3, on every terminal outcome.",
+      guides:
+        "Guide topic ids to read for the model this outcome assumes; fetch with: guide get <topic>",
     },
     ndjsonEvents: ["item", "warning", "progress", "summary", "confirmation_required", "error"],
     exitCodes: ExitCode,
     errorCatalog: errorCatalogTable(),
   },
-  commands: options.contracts.map((contract) => describeSurface(surfaceOf(contract))),
+  commands: options.contracts
+    .filter((contract) => options.only === undefined || contract.name === options.only)
+    .map((contract) => describeSurface(surfaceOf(contract))),
+  guideTopics: guideInventory(options.contracts, options.only),
 })
 
 export const commandSchemas = (contract: AnyContract) => {

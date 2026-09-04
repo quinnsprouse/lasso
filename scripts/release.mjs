@@ -6,6 +6,7 @@
 // (--quick skips the Push profile for CI contexts that already ran it.)
 import { execFileSync } from "node:child_process"
 import { readFileSync, writeFileSync } from "node:fs"
+import { assertWorkspace, requireToolchain, execTool, repoRoot } from "./lib/toolchain.mjs"
 
 const quick = process.argv.includes("--quick")
 const bump = process.argv.slice(2).find((arg) => arg !== "--quick")
@@ -14,8 +15,19 @@ if (bump === undefined || !/^(patch|minor|major|\d+\.\d+\.\d+)$/.test(bump)) {
   process.exit(64)
 }
 
+// Everything below mutates the tree, so the target is verified first and every
+// command runs in the repository root, never in whatever cwd invoked us.
+assertWorkspace()
+requireToolchain()
+process.chdir(repoRoot)
+
 const run = (cmd, cmdArgs, options = {}) =>
-  execFileSync(cmd, cmdArgs, { encoding: "utf8", stdio: ["ignore", "pipe", "inherit"], ...options })
+  execFileSync(cmd, cmdArgs, {
+    encoding: "utf8",
+    stdio: ["ignore", "pipe", "inherit"],
+    cwd: repoRoot,
+    ...options,
+  })
 
 if (run("git", ["status", "--porcelain"]).trim() !== "") {
   process.stderr.write("the worktree must be clean before preparing a release\n")
@@ -38,9 +50,7 @@ if (lock.version !== version || cliVersion !== version) {
   process.exit(1)
 }
 
-run("npx", ["tsdown", "--logLevel", "silent"], {
-  env: { ...process.env, TSDOWN_SKIP_PUBLINT: "1" },
-})
+execTool("tsdown", ["--logLevel", "silent"], { stdio: ["ignore", "pipe", "inherit"] })
 const reported = JSON.parse(run("node", ["dist/bin.cjs", "--version", "--json"])).data.version
 if (reported !== version) {
   process.stderr.write(`the compiled binary reports ${reported}, expected ${version}\n`)

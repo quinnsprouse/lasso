@@ -1,6 +1,7 @@
 import type { AnyContract, Capabilities, ParamSpec } from "./contract.ts"
 import { capabilitiesOf } from "./contract.ts"
 import type { ErrorCode } from "../errors.ts"
+import type { GuideTopic } from "../guides/catalog.generated.ts"
 import { ERROR_CATALOG } from "../errors.ts"
 
 /**
@@ -37,6 +38,8 @@ export interface CommandSurface {
   readonly resultVariants: ReadonlyArray<ResultVariant>
   /** Domain codes declared by the contract plus framework codes the runtime can add. */
   readonly errorCodes: ReadonlyArray<ErrorCode>
+  /** Guide topics the contract declares, in declaration (importance) order. */
+  readonly guides: ReadonlyArray<GuideTopic>
 }
 
 const FRAMEWORK_MUTATION_PARAMS: ReadonlyArray<SurfaceParam> = [
@@ -70,6 +73,15 @@ const FRAMEWORK_MUTATION_PARAMS: ReadonlyArray<SurfaceParam> = [
   },
 ]
 
+/** Spellings the runtime owns for every command of the matching kind. */
+export const FRAMEWORK_CLI_NAMES: ReadonlyArray<string> = [
+  ...FRAMEWORK_MUTATION_PARAMS.map((param) => param.cliName),
+  "--fields",
+]
+export const FRAMEWORK_ALIASES: ReadonlyArray<string> = FRAMEWORK_MUTATION_PARAMS.flatMap(
+  (param) => (param.alias !== undefined ? [param.alias] : []),
+)
+
 const fieldsParam = (fields: ReadonlyArray<string>): SurfaceParam => ({
   key: "fields",
   cliName: "--fields",
@@ -83,8 +95,8 @@ const fieldsParam = (fields: ReadonlyArray<string>): SurfaceParam => ({
 /** Codes the runtime itself can produce for any command of the given kind. */
 const frameworkErrorCodes = (contract: AnyContract): ReadonlyArray<ErrorCode> =>
   contract.kind === "mutation"
-    ? ["invalid_usage", "invalid_data", "stale_confirmation", "internal_error"]
-    : ["invalid_usage", "invalid_data", "internal_error"]
+    ? ["invalid_usage", "invalid_data", "stale_confirmation", "internal_error", "interrupted"]
+    : ["invalid_usage", "invalid_data", "internal_error", "interrupted"]
 
 export const surfaceOf = (contract: AnyContract): CommandSurface => {
   const contractParams: Array<SurfaceParam> = Object.entries(
@@ -148,6 +160,7 @@ export const surfaceOf = (contract: AnyContract): CommandSurface => {
     params: [...contractParams, ...framework],
     resultVariants,
     errorCodes,
+    guides: [...(contract.guides ?? [])],
   }
 }
 

@@ -4,12 +4,7 @@ import { StoreReader, StoreWriter } from "../services/store.ts"
 import { Errors } from "../errors.ts"
 import { defineMutation } from "../contract/contract.ts"
 
-/**
- * The mutation pattern. `plan` runs with read capabilities only and produces
- * a SELF-CONTAINED plan — including the no-op case, so `--if-not-exists`
- * changes the plan (and therefore the confirmation token), never apply-time
- * behavior. `apply` sees nothing but the confirmed plan.
- */
+// The no-op decision belongs in the confirmed plan, not in apply-time flags.
 
 const CreatePlan = Schema.Union([
   Schema.Struct({
@@ -56,6 +51,7 @@ export const taskCreate = defineMutation({
     "invalid_config",
     "transient_failure",
   ],
+  guides: ["task-ids", "mutation-replay"],
   examples: [
     {
       command: 'lasso task create "Ship the kit" --yes --json',
@@ -75,6 +71,12 @@ export const taskCreate = defineMutation({
       })
     }
     const id = taskId(title)
+    if (id === "task_") {
+      return yield* Errors.invalidData({
+        message: `task title "${title}" yields no identifier: it has no ASCII letters or digits`,
+        fix: "include at least one ASCII letter or digit in the title",
+      })
+    }
     const reader = yield* StoreReader
     const tasks = yield* reader.load
     const existing = tasks.find((task) => task.id === id)
@@ -82,15 +84,23 @@ export const taskCreate = defineMutation({
       if (input.ifNotExists) {
         return { action: "no_op" as const, reason: "already_exists" as const, taskId: id }
       }
-      return yield* Errors.conflict({
+      return yield* Errors.resourceConflict({
         message: `task "${id}" already exists`,
         fix: "re-run with --if-not-exists to make this a no-op",
+        next: [
+          {
+            message: "see the existing task",
+            args: ["task", "list", "--status", "all", "--json"],
+          },
+          {
+            message: "make this create a no-op (preview first)",
+            // The title goes after "--" so a title that starts with "-" is not a flag.
+            args: ["task", "create", "--if-not-exists", "--json", "--", input.title],
+          },
+        ],
       })
     }
-    // Plans must be DETERMINISTIC for identical state and input — replaying
-    // confirmArgs recomputes the plan and compares tokens. Apply-assigned
-    // metadata (like createdAt) therefore stays out of the plan: the token
-    // binds intent, not server-generated timestamps.
+    // Assign timestamps in apply so identical plans keep the same confirmation token.
     return {
       action: "create_task" as const,
       task: { id, title, status: "open" as const },
@@ -99,7 +109,8 @@ export const taskCreate = defineMutation({
   apply: Effect.fn("taskCreate.apply")(function* (plan) {
     const writer = yield* StoreWriter
     if (plan.action === "no_op") {
-      const tasks = yield* writer.modify((current) => current)
+      // null avoids a write that would notify file watchers on a no-op.
+      const tasks = yield* writer.modify(() => null)
       const existing = tasks.find((task) => task.id === plan.taskId)
       if (existing === undefined) {
         return yield* Errors.staleConfirmation({
@@ -114,13 +125,14 @@ export const taskCreate = defineMutation({
     let conflicted = false
     const tasks = yield* writer.modify((current) => {
       if (current.some((existing) => existing.id === task.id)) {
+        // null: nothing is written, so a rejected mutation leaves the file untouched.
         conflicted = true
-        return current
+        return null
       }
       return [...current, task]
     })
     if (conflicted) {
-      return yield* Errors.conflict({
+      return yield* Errors.resourceConflict({
         message: `task "${task.id}" was created by another process`,
         fix: "re-run with --if-not-exists to make this a no-op",
       })
@@ -128,6 +140,12 @@ export const taskCreate = defineMutation({
     const created = tasks.find((existing) => existing.id === task.id)
     return { created: true, task: created ?? task }
   }),
+  next: ({ data }) => [
+    {
+      message: data.created ? "see the new task in the list" : "see the existing task",
+      args: ["task", "list", "--status", "all", "--json"],
+    },
+  ],
   renderText: (data) =>
     data.created
       ? `Created ${data.task.id}: ${data.task.title}`

@@ -3,11 +3,7 @@ import { defineQuery } from "../contract/contract.ts"
 import { Progress } from "../output/progress.ts"
 import { StoreReader } from "../services/store.ts"
 
-/**
- * The progress-reporting example: a query that narrates its phases. NDJSON
- * consumers see nonterminal `progress` events; json/text consumers see
- * stderr lines. The pattern to copy for any long-running command.
- */
+// Example of progress reporting without writing directly to stdout.
 export const taskAudit = defineQuery({
   name: "task audit",
   summary: "Check the task store for duplicate ids and count entries",

@@ -5,13 +5,10 @@ import type { OutputMode } from "./format.ts"
 import type { Outcome } from "./outcome.ts"
 import { renderOutcome } from "./outcome.ts"
 
-/**
- * The Renderer owns stdout inside the Effect runtime. It is a thin adapter
- * over `renderOutcome` — the single definition of the wire format — writing
- * through the Stdio service so tests can capture output with a test layer.
- */
+// Stdio keeps output capturable through test layers.
 
-const decodeProgress = Schema.decodeUnknownSync(ProgressEvent)
+const decodeProgress = Schema.decodeUnknownEffect(ProgressEvent)
+const encodeProgressLine = Schema.encodeSync(Schema.fromJsonString(ProgressEvent))
 
 /** Progress input; `completed` and `total` must appear together. */
 export interface ProgressUpdate {
@@ -29,8 +26,6 @@ export interface RendererApi {
    * on stdout. JSON and text: a stderr line — stdout stays terminal-only.
    */
   progress(update: ProgressUpdate): Effect.Effect<void, PlatformError.PlatformError>
-  /** Diagnostic line — always stderr, never stdout. */
-  note(message: string): Effect.Effect<void, PlatformError.PlatformError>
 }
 
 export class Renderer extends Context.Service<Renderer, RendererApi>()("lasso/output/Renderer") {
@@ -39,9 +34,7 @@ export class Renderer extends Context.Service<Renderer, RendererApi>()("lasso/ou
       Renderer,
       Effect.gen(function* () {
         const stdio = yield* Stdio.Stdio
-        // The terminal latch: after an outcome is emitted, any further
-        // output through this Renderer is a defect, so a detached reporting
-        // fiber can never write past the terminal event.
+        // Detached reporting fibers must not write after the terminal event.
         let terminated = false
 
         const writeTo = (stream: "stdout" | "stderr", text: string) =>
@@ -53,45 +46,39 @@ export class Renderer extends Context.Service<Renderer, RendererApi>()("lasso/ou
             ),
           )
 
-        const progress = (update: ProgressUpdate) => {
+        // Check at execution time, even when a handler constructs a progress effect early.
+        const progress = Effect.fn("Renderer.progress")(function* (update: ProgressUpdate) {
           if (terminated) {
-            return Effect.die(new Error("progress after the terminal event"))
+            return yield* Effect.die(new Error("progress after the terminal event"))
           }
-          // One shared contract: the same schema that types the wire event
-          // validates every report (kebab phase, counter pairing, bounds).
-          let event: ProgressEvent
-          try {
-            event = decodeProgress({
-              event: "progress",
-              phase: update.phase,
-              message: update.message,
-              ...(update.completed !== undefined ? { completed: update.completed } : {}),
-              ...(update.total !== undefined ? { total: update.total } : {}),
-            })
-          } catch (cause) {
-            return Effect.die(cause)
-          }
+          const event = yield* decodeProgress({
+            event: "progress",
+            phase: update.phase,
+            message: update.message,
+            ...(update.completed !== undefined ? { completed: update.completed } : {}),
+            ...(update.total !== undefined ? { total: update.total } : {}),
+          }).pipe(Effect.orDie)
           if (mode.format === "ndjson") {
-            return writeTo("stdout", `${JSON.stringify(event)}\n`)
+            return yield* writeTo("stdout", `${encodeProgressLine(event)}\n`)
           }
           const counter =
             event.completed !== undefined ? ` (${event.completed}/${event.total})` : ""
-          return writeTo("stderr", `progress[${event.phase}]: ${event.message}${counter}\n`)
-        }
+          return yield* writeTo("stderr", `progress[${event.phase}]: ${event.message}${counter}\n`)
+        })
 
         return Renderer.of({
           mode,
-          emit: (outcome) => {
-            if (terminated) {
-              return Effect.die(new Error("emit after the terminal event"))
-            }
-            terminated = true
-            return Effect.forEach(renderOutcome(mode, binName, outcome), (write) =>
-              writeTo(write.stream, write.text),
-            ).pipe(Effect.asVoid)
-          },
+          emit: (outcome) =>
+            Effect.suspend(() => {
+              if (terminated) {
+                return Effect.die(new Error("emit after the terminal event"))
+              }
+              terminated = true
+              return Effect.forEach(renderOutcome(mode, binName, outcome), (write) =>
+                writeTo(write.stream, write.text),
+              ).pipe(Effect.asVoid)
+            }),
           progress,
-          note: (message) => writeTo("stderr", `${message}\n`),
         })
       }),
     )
