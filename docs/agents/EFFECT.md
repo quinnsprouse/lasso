@@ -2,7 +2,7 @@
 
 This kit uses Effect v4 (beta, exact-pinned). The package ships its own agent docs: read `node_modules/effect/AGENTS.md` and the compile-checked examples in `node_modules/effect/ai-docs/src/` when you need API details — they match the installed version, unlike web docs.
 
-Misuse is caught mechanically at three points: about 80 `effecttsgo/*` oxlint rules (extended from `@effect/tsgo` presets in `.oxlintrc.json`), the `effect-tsgo diagnostics` step in every profile, and the post-edit hook, which formats and lints each edited script file and, for `.ts`, runs the full typecheck and file-scoped diagnostics. Trust the gates.
+Misuse is caught mechanically at three points: about 80 `effecttsgo/*` oxlint rules (extended from `@effect/tsgo` presets in `.oxlintrc.json`), the `effect-tsgo diagnostics` step in every profile, and the post-edit hook, which formats and lints each edited script file and optionally runs full typechecking and file-scoped diagnostics when `LASSO_POST_EDIT_FULL=1`. Trust the gates.
 
 `effect` and `@effect/platform-node` are exact-pinned to the same beta in `package.json` and move together only during a deliberate, separately verified upgrade; never run a generic `effect@beta` install here.
 

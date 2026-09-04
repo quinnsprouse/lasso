@@ -8,7 +8,13 @@ Handlers take services, so tests provide in-memory layers and run plan/apply as 
 
 ## Contract invariants (`test/contract/`) — mechanical protocol rejection
 
-`invariants.test.ts` runs every registered contract against the protocol rules (reserved CLI names, error codes, examples, standalone schema generation, the error-catalog table, the frozen exit registry, and plan determinism: every mutation is planned twice against identical fake state); `compatibility.test.ts` compares the current `describe` and `schema` payloads with `surface.snapshot.json` through the comparator in `surface-diff.ts` and fails when it reports a breaking change (removed or changed protocol, newly required or newly constrained inputs, weakened or widened outputs) or an unrecorded addition; `npm run surface:update` shares that comparator and refuses breaking changes unless `--allow-breaking` is passed after review; a genuine break also bumps `schemaVersion`); `runtime.test.ts` drives the real parser + adapter + renderer in-process through test layers (the harness is `harness.ts`), proving the mutation state machine, every stream shape, and stdout purity against a handler that logs; `commands.test.ts` runs the shipped roster through the same harness, so every command's handler, text rendering, and guidance is covered without the binary (coverage counts in-process runs only, never e2e); `type-fixtures.ts` proves invalid params, unwired services, and capability-split violations fail `tsc`; `guides.test.ts` checks every guide topic (honest metadata, every fenced command parses, every declared topic exists, no flag lists) and `skill.test.ts` checks the shipped skill (size budget, portable frontmatter, every command and topic it names is real); `test/unit/invocation.test.ts` pins the shared invocation validator against the real parser; `test/unit/guard.test.ts` runs the guard hook over the table in GUARDS.md. When you add a command, these tests are the spec. Add new invariants here when a convention matters enough to enforce.
+- `invariants.test.ts` checks contract declarations, error codes, schema generation, and plan determinism.
+- `compatibility.test.ts` requires the recorded `describe` and `schema` definitions to match. Run `npm run surface:update` and review the diff for compatibility.
+- `runtime.test.ts` exercises the parser, mutation flow, rendering, and stdout purity through fake services. `commands.test.ts` exercises the demo commands.
+- `type-fixtures.ts` checks invalid parameters and service boundaries at compile time.
+- `guides.test.ts` and `skill.test.ts` check references to real commands and topics. Writing style and length are authoring choices.
+- `test/unit/guide-generator.test.ts` verifies empty catalogs and standalone workflow topics.
+- `test/unit/guard.test.ts` checks direct-command refusals and the shell syntax the hook leaves alone.
 
 ## E2E (`test/e2e/`) — the shipped artifact, black-box
 

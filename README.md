@@ -33,8 +33,8 @@ In JSON mode, Lasso writes one envelope to stdout for each invocation. It sends 
 - Exit code 4 requests confirmation. `transient: true` means a retry may work (exits 69, 75, and 130 carry it).
 - `describe --json` lists every command. `schema --json` returns JSON Schema draft 2020-12.
 - Every outcome carries `next` (executable next moves) and `guides` (topic ids); `guide get <topic>` serves version-matched guides for what the surface cannot express, and `skills/` ships the skill that routes agents to them.
-- A committed surface snapshot rejects drift its comparator classifies as breaking (removed or changed protocol, newly required inputs, narrowed inputs, weakened outputs) and requires review for additions.
-- Claude Code guards in `.claude/` refuse the common gate bypasses before a tool call and report format, lint, type, and Effect diagnostics after source edits.
+- A committed snapshot makes command and schema changes visible in review. Tests require the snapshot to stay current; reviewers decide compatibility.
+- Claude Code hooks in `.claude/` check direct commands and report formatting and lint errors after edits. Full type and Effect checks after each edit are opt-in.
 
 Read the [output protocol](docs/agents/PROTOCOL.md) for envelopes, NDJSON, exit codes, and confirmation.
 

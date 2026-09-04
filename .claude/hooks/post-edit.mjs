@@ -1,7 +1,9 @@
 #!/usr/bin/env node
 // Edit Feedback (PostToolUse on Edit|Write): after an agent edits a .ts,
 // .mjs, .cjs, or .json file, format it and return lint, type, and Effect
-// diagnostics while the agent still has the context to repair them.
+// diagnostics while the agent still has the context to repair them. Types
+// and Effect diagnostics require LASSO_POST_EDIT_FULL=1; the shared check
+// command always runs both.
 //
 // PostToolUse runs after the edit has landed: exit 2 cannot undo it, but it
 // puts the diagnostics in front of the agent as the next thing to fix. Exit 0
@@ -101,7 +103,8 @@ if (!lint.ok) {
   block(`oxlint found problems in ${rel}:\n${lint.output.slice(0, 4000)}`)
 }
 
-if (!rel.endsWith(".ts")) {
+// Opt in when immediate project-wide feedback is useful; npm run check always runs it.
+if (!rel.endsWith(".ts") || process.env.LASSO_POST_EDIT_FULL !== "1") {
   process.exit(0)
 }
 

@@ -168,6 +168,7 @@ const main = async (): Promise<number> => {
       const reason = validateInvocation(
         surfaces,
         tokens.filter((arg) => !/^(--help|-h|--no-help)(=.*)?$/.test(arg)),
+        { allowMissingArguments: true },
       )
       if (reason !== undefined) {
         return usage(reason, `run ${CLI_NAME} describe --json to list valid flags`)

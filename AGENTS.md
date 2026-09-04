@@ -32,7 +32,7 @@ Never skip, focus, or `.todo` a test to get green; test hygiene fails the Fast p
 3. Expected failures are built through `Errors.*` in `src/errors.ts`; those factories require an executable `fix`, and the runtime maps exit and transience from the catalog, never from the error instance.
 4. `renderOutcome` in `src/output/outcome.ts` is the single definition of the wire format. The Renderer emits it inside Effect, `src/bin.ts` writes at the process boundary, and the adapter's shim passes only the parser's `--version` line. In machine formats, diagnostics and stray Effect `Console` output go to stderr; `Console` is lint-banned in `src/` outside the process-boundary exceptions (`src/bin.ts`, the adapter shim).
 5. Guidance is one vocabulary on every terminal outcome: `error.fix` (required), `next` (executable argv, validated against the surface, at most three), `guides` (topic ids). Guides live in `guides/topics/*.md`, inlined into the bundle by `node scripts/guides.mjs`; a topic exists only for knowledge the surface cannot express. See [docs/agents/GUIDANCE.md](docs/agents/GUIDANCE.md).
-6. The published surface is additive-only: never rename or remove commands, flags, defaults, exit codes, error codes, envelope fields, or schema fields, and never add a required parameter or a narrowing schema constraint. `test/contract/surface.snapshot.json` records the published `describe` and `schema` payloads; `npm run check` fails on drift the comparator in `test/contract/surface-diff.ts` classifies as breaking and on unrecorded additions.
+6. Preserve compatibility for published commands and output. `test/contract/surface.snapshot.json` records `describe` and `schema`; `npm run check` fails on any unrecorded change. Review the snapshot diff for compatibility. Before the first release, replace the demo freely.
 
 ## Changing the surface
 
@@ -45,7 +45,7 @@ npm run check
 
 For a mutation, generate the skeleton, then replace `defineQuery` with `defineMutation`: add `planSchema`, `plan` (read services), `apply` (write services), and `idempotency`; add a unit test through fake layers (`test/unit/task-create.test.ts` is the pattern) and a happy-path plus a failure e2e case; then `npm run surface:update` (the generator recorded only the query).
 
-A new or edited guide topic: edit `guides/topics/<topic>.md`, run `node scripts/guides.mjs`, declare it on a contract (`guides: [...]`), then record the surface change as below.
+A new or edited guide topic: edit `guides/topics/<topic>.md`, run `node scripts/guides.mjs`, optionally declare it on a contract (`guides: [...]`), then record the surface change as below.
 
 Any other additive change (new flag, error code, schema field):
 
@@ -55,7 +55,7 @@ git diff -- test/contract/surface.snapshot.json   # the diff is the review
 npm run check
 ```
 
-`npm run surface:update -- --allow-breaking` is the reviewed override: the comparator is structural, so it also flags a few safe changes it cannot prove (for example an output field going from nullable to always present). Use the flag only after a human reviewed the listed drift and the CHANGELOG entry explains it. A genuinely breaking change additionally bumps `SCHEMA_VERSION` in `src/output/envelope.ts` and documents the migration; the updater does not verify that bump for you.
+`npm run surface:update` records the current definitions without classifying changes as safe or breaking. Review the diff before committing. A breaking change to a published CLI also bumps `SCHEMA_VERSION` in `src/output/envelope.ts` and documents the migration.
 
 To add an expected error code: add the `ERROR_CATALOG` row and the `Errors.*` factory in `src/errors.ts`, add the row to the table in `docs/agents/COMMANDS.md` (the invariants parse it), declare the code in each producing contract's `domainErrorCodes`, then `npm run surface:update`.
 
@@ -67,8 +67,8 @@ Before writing Effect code, read `node_modules/effect/AGENTS.md`; for API detail
 
 `.claude/hooks/` backs the rules while you work; details in [docs/agents/GUARDS.md](docs/agents/GUARDS.md).
 
-- `guard.mjs` (before Bash, Edit, Write) refuses the specific bypass patterns listed in `docs/agents/GUARDS.md` — hook skips, `LEFTHOOK=0`, `core.hooksPath` changes, force-pushes to or deletion of main, `npx`-style execution of pinned tools, `rm` of `.git` or the lockfile — and edits to generated or protected paths. It judges approximate argv, prints the reason and the compliant path, and is a speed bump, not a sandbox.
-- `post-edit.mjs` (after Edit or Write of `.ts`, `.mjs`, `.cjs`, `.json`) formats the file, lints script files, and for `.ts` runs the full typecheck and file-scoped Effect diagnostics. It reports failures after the edit so you repair with the context fresh; it cannot undo the edit.
+- `guard.mjs` checks direct commands for common hook bypasses, destructive git operations, unpinned tool execution, and deletion of git metadata or the lockfile. It also protects generated files from Edit/Write. It does not interpret shell programs; see GUARDS.md for its scope.
+- `post-edit.mjs` formats edited files and lints scripts. Full typechecking and Effect diagnostics after each TypeScript edit are opt-in with `LASSO_POST_EDIT_FULL=1`; `npm run check` always runs both.
 - `session-start.mjs` prints the doctor's failing checks (or one healthy line); `stop-check.mjs` runs the Fast profile when the tree is dirty and refuses to end the turn while it is red.
 
 Scripts and the post-edit hook resolve every tool through `scripts/lib/toolchain.mjs`; the git hooks invoke pinned `node_modules` entries directly; the session and stop hooks invoke repository scripts. Nothing runs through `npx`.

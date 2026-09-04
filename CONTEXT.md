@@ -9,11 +9,11 @@ The single declaration of a command: name, params, schemas, error codes, example
 _Avoid_: command definition, command config
 
 **Output Protocol**:
-The frozen machine surface: envelopes with `schemaVersion`, the exit-code registry, NDJSON events, and the confirmation flow. Changes are additive only by policy, and the Surface Snapshot feeds the structural comparator that enforces the cases it can classify.
+The machine output contract: versioned envelopes, exit codes, NDJSON events, and confirmation flow. Published changes need compatibility review.
 _Avoid_: output format, JSON mode
 
 **Surface Snapshot**:
-The recorded `describe` and `schema` payloads in `test/contract/surface.snapshot.json`. The compatibility test fails when anything recorded is removed or changed, when an input parameter or schema member becomes required or gains a constraint or default, when an output schema promises less or may produce more (a dropped required member, a grown `enum`), and when the surface gained something not yet recorded. Prose (`description`, `summary`, `examples`) is informational. `npm run surface:update` records additions and refuses breaking changes unless `--allow-breaking` is passed after human review (a genuine break also bumps `schemaVersion`); the diff is the review.
+The recorded `describe` and `schema` payloads in `test/contract/surface.snapshot.json`. Tests fail on any unrecorded change. Run `npm run surface:update`, then review the diff for compatibility; the tool does not classify changes.
 _Avoid_: golden file, fixture
 
 **Plan/Apply Split**:
@@ -45,7 +45,7 @@ An authored Markdown model in `guides/topics/`, served by the binary through `gu
 _Avoid_: doc, help page, skill reference
 
 **Shipped Skill**:
-`skills/<bin>/SKILL.md`, the only guidance in an agent's context before its first command: the safety contract and a router of intents to first moves and guide topics. Size-budgeted, and it names topics, never teaches them.
+`skills/<bin>/SKILL.md`, the guidance in an agent's context before its first command: the safety contract and a concise router of intents to first moves and guide topics.
 _Avoid_: prompt, system instructions
 
 **Output Authority**:

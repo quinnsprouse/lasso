@@ -258,6 +258,20 @@ describe("progress through the shipped binary", () => {
 })
 
 describe("machine help with a full command line", () => {
+  it.each([
+    ["task", "create"],
+    ["guide", "get"],
+  ])("help for %s %s works before required arguments are known", async (...command) => {
+    await Promise.all(
+      ["json", "ndjson", "text"].map(async (format) => {
+        const result = await run([...command, "--help", "--format", format])
+        expect(result.exitCode).toBe(0)
+        if (format === "json") expect(parse(result.stdout).status).toBe("ok")
+        if (format === "ndjson") expect(parse(result.stdout).event).toBe("summary")
+      }),
+    )
+  })
+
   it("answers describe data when the named command is followed by flags", async () => {
     const result = await run(["task", "list", "--status", "all", "--help", "--json"])
     expect(result.exitCode).toBe(0)

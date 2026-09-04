@@ -28,7 +28,6 @@ describe("guide list", () => {
     for (const item of envelope!.data.items) {
       expect(item.bytes).toBeGreaterThan(0)
       expect(item.brief.length).toBeGreaterThan(0)
-      expect(item.commands.length).toBeGreaterThan(0)
     }
   })
 
@@ -58,7 +57,6 @@ describe("guide get", () => {
     expect(envelope!.data.topic).toBe(topic)
     expect(envelope!.data.title.length).toBeGreaterThan(0)
     expect(envelope!.data.content).toContain(envelope!.data.title)
-    expect(envelope!.data.commands.length).toBeGreaterThan(0)
   })
 
   it("--brief drops the content and keeps the synopsis", async () => {

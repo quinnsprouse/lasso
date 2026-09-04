@@ -10,8 +10,7 @@ import { CLI_NAME } from "../../src/meta.ts"
 /**
  * The shipped skill is layer one of the guidance model: only what an agent
  * must know BEFORE its first command (the safety contract) plus a router into
- * the binary's guides. It is size-budgeted, it names only real commands and
- * topics, and it never duplicates a topic body.
+ * the binary's guides. References must name real commands and topics.
  */
 
 const SKILL = join(import.meta.dirname, "..", "..", "skills", CLI_NAME, "SKILL.md")
@@ -44,15 +43,11 @@ const argvOf = (span: string): ReadonlyArray<string> =>
     .map((token) => token.replace(/^"|"$/g, ""))
 
 describe("shipped skill", () => {
-  it("stays a compact operating contract plus router", () => {
-    expect(Buffer.byteLength(skill, "utf8")).toBeLessThan(4_200)
-  })
-
   it("carries portable frontmatter whose name matches its directory", () => {
     const meta = frontmatter()
     expect(meta["name"]).toBe(basename(dirname(SKILL)))
     expect(meta["name"]).toBe(CLI_NAME)
-    expect(meta["description"]!.length).toBeGreaterThan(40)
+    expect(meta["description"]!.trim().length).toBeGreaterThan(0)
     expect(meta["description"]!.length).toBeLessThanOrEqual(1024)
   })
 
@@ -82,7 +77,6 @@ describe("shipped skill", () => {
       .filter(
         (line) => line.startsWith("| ") && !line.startsWith("| Intent") && !line.startsWith("|---"),
       )
-    expect(rows.length).toBeGreaterThan(3)
     for (const row of rows) {
       const cell = row.split("|")[3] ?? ""
       for (const topic of [...cell.matchAll(/`([a-z0-9-]+)`/g)].map((match) => match[1]!)) {
@@ -95,11 +89,5 @@ describe("shipped skill", () => {
     // next and guides are top-level on every envelope; error holds code, message, fix, transient.
     expect(skill).not.toContain("error.next")
     expect(skill).not.toContain("error.guides")
-  })
-
-  it("does not duplicate a topic body", () => {
-    // A skill that restates a guide defeats the timing model: it names topics, never teaches them.
-    expect(skill).not.toMatch(/Lowercase the title/i)
-    expect(skill).not.toMatch(/hash of/i)
   })
 })

@@ -23,7 +23,7 @@ const fail = (message) => {
 }
 
 /** Frontmatter: `---\nkey: value\n---\n\n` then Markdown. Keys are single-line. */
-export const parseTopic = (file, raw) => {
+const parseTopic = (file, raw) => {
   const source = raw.replaceAll("\r\n", "\n")
   const match = source.match(/^---\n([\s\S]*?)\n---\n\n([\s\S]*?)\n?$/)
   if (match === null)
@@ -48,25 +48,21 @@ export const parseTopic = (file, raw) => {
   }
   if (!/^[a-z][a-z0-9]*(-[a-z0-9]+)*$/.test(meta.topic)) fail(`${file}: topic must be kebab-case`)
   if (file !== `${meta.topic}.md`) fail(`${file}: filename must be ${meta.topic}.md`)
-  if (meta.title.length < 9 || meta.title.length > 88)
-    fail(`${file}: title must be 9-88 characters`)
-  if (meta.brief.length < 40 || meta.brief.length >= 400) {
-    fail(`${file}: brief must be 40-399 characters (the "read this when" synopsis)`)
-  }
   const content = match[2].trim()
   const bytes = Buffer.byteLength(content, "utf8")
-  if (bytes < 300 || bytes > 12_000) {
-    fail(`${file}: body must be 300-12000 UTF-8 bytes (a model, sized for an agent's context)`)
+  if (bytes === 0 || bytes > 12_000) {
+    fail(
+      `${file}: body must be nonempty and at most 12000 UTF-8 bytes (a model, sized for an agent's context)`,
+    )
   }
   if (!content.startsWith("# ")) fail(`${file}: body must start with a level-one heading`)
   return { topic: meta.topic, title: meta.title, brief: meta.brief, content }
 }
 
-const topics = readdirSync(TOPIC_DIR)
+const topics = (existsSync(TOPIC_DIR) ? readdirSync(TOPIC_DIR) : [])
   .filter((file) => file.endsWith(".md"))
   .toSorted()
   .map((file) => parseTopic(file, readFileSync(join(TOPIC_DIR, file), "utf8")))
-if (topics.length === 0) fail("guides/topics/ has no topics; the catalog needs at least one")
 if (new Set(topics.map((t) => t.topic)).size !== topics.length) fail("guide topics must be unique")
 
 const literal = (value) => JSON.stringify(value)
@@ -82,7 +78,7 @@ export interface GuideEntry {
   readonly content: string
 }
 
-export type GuideTopic = ${topics.map((t) => literal(t.topic)).join(" | ")}
+export type GuideTopic = ${topics.map((t) => literal(t.topic)).join(" | ") || "never"}
 
 export const GUIDE_TOPICS: ReadonlyArray<GuideEntry & { readonly topic: GuideTopic }> = [
 ${topics

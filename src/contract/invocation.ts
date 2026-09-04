@@ -234,6 +234,7 @@ export const resolveCommandPath = (
 export const validateInvocation = (
   surfaces: ReadonlyArray<CommandSurface>,
   args: ReadonlyArray<string>,
+  options: { readonly allowMissingArguments?: boolean } = {},
 ): string | undefined => {
   const resolved = resolveCommandPath(surfaces, args)
   if (resolved.error !== undefined) {
@@ -345,7 +346,7 @@ export const validateInvocation = (
       return `${name} needs an integer, got "${value}"`
     }
   }
-  if (positionals < positional.length) {
+  if (!options.allowMissingArguments && positionals < positional.length) {
     return `"${surface.name}" needs ${positional.length} argument(s), got ${positionals}`
   }
   if (positionals > positional.length) {

@@ -21,7 +21,7 @@ Node 22.19 or newer and npm 10 or newer. `.node-version` pins 24 for tool manage
 
 ## Changing the surface
 
-Additions run `npm run surface:update` and commit the snapshot diff. `--allow-breaking` is the reviewed override for drift the structural comparator cannot prove safe; a genuine break also bumps `SCHEMA_VERSION` and gets a CHANGELOG migration. Read the "Changing the surface" section of [AGENTS.md](AGENTS.md) first.
+Run `npm run surface:update` and review the snapshot diff for compatibility. A breaking change to a published CLI also bumps `SCHEMA_VERSION` and gets a CHANGELOG migration. Before the first release, replace the demo freely. Read the "Changing the surface" section of [AGENTS.md](AGENTS.md).
 
 ## Making it yours
 
@@ -29,7 +29,7 @@ Before the first publish of a CLI built from this template:
 
 1. `node scripts/rename.mjs <name>` — package name, bin, skill directory, `CLI_NAME`, env prefix, state directory, docs, tests.
 2. `package.json`: `name` (your npm scope), `description`, `keywords`, `repository`, `homepage`, `bugs`; `src/meta.ts`: `CLI_SUMMARY`; `LICENSE`: the copyright holder; `SECURITY.md`: your reporting path.
-3. Replace the demo: `src/domain/`, `src/commands/task-*.ts`, their tests, the topics in `guides/topics/`, and the router rows in `skills/<name>/SKILL.md`. Then reset the surface baseline: `rm test/contract/surface.snapshot.json && npm run surface:update`, and lower the coverage ratchet in `vitest.config.ts` if the suite shrank.
+3. Replace the demo: `src/domain/`, `src/commands/task-*.ts`, their tests, the topics in `guides/topics/`, and the router rows in `skills/<name>/SKILL.md`. Then record your definitions: `npm run surface:update`, and lower the coverage ratchet in `vitest.config.ts` if the suite shrank.
 4. Publish the first version from your terminal (below), then configure the repository as an npm trusted publisher for the package (see `.github/workflows/release.yml`); the runner needs npm 11.5.1 or newer, which Node 24 ships.
 
 The shipped skill lands at `node_modules/<package>/skills/<name>/SKILL.md` for consumers of the published package; point an agent harness at that path (or copy it into its skills directory).
