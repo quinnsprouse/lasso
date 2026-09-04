@@ -1,14 +1,7 @@
 #!/usr/bin/env node
-// The verification profiles. One definition; the pre-push hook and CI run
-// the same commands, so local green means CI green.
-//
-//   fast  format check, lint, types, effect diagnostics, test hygiene, guide catalog, unit + contract tests
-//   push  fast + build (tsdown, with publint), knip, e2e against dist, pack smoke test
-//   ci    push + coverage + starter contract
-//
-// Tools run through scripts/lib/toolchain.mjs: the pinned node_modules
-// version, never npx (which would fetch a same-named package when the
-// install is missing).
+// fast: format, type-aware lint (Effect + Vitest), types, guide catalog, unit + contract tests
+// push: fast + build (with publint), knip, e2e against dist, pack smoke
+// ci: push + coverage + starter contract
 import { spawnSync } from "node:child_process"
 import { repoRoot, requireToolchain, spawnTool } from "./lib/toolchain.mjs"
 
@@ -18,13 +11,6 @@ const profiles = {
     step("fmt:check", "biome", ["format", "."]),
     step("lint", "oxlint", ["--type-aware", "--deny-warnings"]),
     step("typecheck", "tsc", ["--noEmit"]),
-    step("effect diagnostics", "effect-tsgo", [
-      "diagnostics",
-      "--project",
-      "tsconfig.json",
-      "--strict",
-    ]),
-    step("test hygiene", "node", ["scripts/test-hygiene.mjs"]),
     step("guide catalog", "node", ["scripts/guides.mjs", "--check"]),
     // e2e is deliberately excluded here: it depends on dist, which Push builds.
     step("unit tests", "vitest", ["run", "--reporter=dot", "test/unit", "test/contract"]),

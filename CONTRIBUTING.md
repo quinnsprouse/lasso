@@ -44,10 +44,10 @@ git add -A && git commit -m "chore: release vX.Y.Z"
 git tag vX.Y.Z && git push && git push origin vX.Y.Z
 ```
 
-The tag triggers `.github/workflows/release.yml`: it verifies version agreement, runs the CI profile, packs, attests the tarball, and publishes it through npm trusted publishing. No token is needed — except once. npm cannot register a trusted publisher for a package that has never been published, so bootstrap the very first version from a terminal where `npm login` has run:
+The tag triggers `.github/workflows/release.yml`. It verifies version agreement, runs the CI profile, packs, and publishes that tarball through npm trusted publishing. npm generates provenance automatically for public packages published from public repositories. Bootstrap the first version from a terminal where `npm login` has run, then configure trusted publishing:
 
 ```bash
 npm run check:push && npm pack && npm publish ./<name>-0.1.0.tgz
 ```
 
-Then add the trusted publisher on npmjs.com (repository, workflow `release.yml`) and let the tag workflow publish every later version.
+On npmjs.com, add the repository and workflow `release.yml` as a trusted publisher. Under **Allowed actions**, enable direct `npm publish` for the tag workflow. To require manual approval instead, use stage-only permissions and change the workflow to `npm stage publish`. See [npm's trusted-publisher setup](https://docs.npmjs.com/trusted-publishers/).

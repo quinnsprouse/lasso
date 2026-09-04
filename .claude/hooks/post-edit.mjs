@@ -1,16 +1,6 @@
 #!/usr/bin/env node
-// Edit Feedback (PostToolUse on Edit|Write): after an agent edits a .ts,
-// .mjs, .cjs, or .json file, format it and return lint, type, and Effect
-// diagnostics while the agent still has the context to repair them. Types
-// and Effect diagnostics require LASSO_POST_EDIT_FULL=1; the shared check
-// command always runs both.
-//
-// PostToolUse runs after the edit has landed: exit 2 cannot undo it, but it
-// puts the diagnostics in front of the agent as the next thing to fix. Exit 0
-// passes. A missing toolchain reports the fix ("run npm ci") rather than
-// silently passing or — worse — letting `npx` fetch a same-named package.
-// Budget: Claude Code kills hooks at 120s (see .claude/settings.json), so the
-// per-step timeouts below must sum to less than that.
+// PostToolUse cannot undo an edit; exit 2 returns actionable format/lint failures.
+// Full project typechecking is opt-in. Per-step timeouts stay below the hook's 120s budget.
 import { execFileSync } from "node:child_process"
 import { readFileSync } from "node:fs"
 import { relative, resolve } from "node:path"
@@ -112,17 +102,4 @@ if (!rel.endsWith(".ts") || process.env.LASSO_POST_EDIT_FULL !== "1") {
 const types = run("tsc", ["--noEmit"], 45_000)
 if (!types.ok) {
   block(`tsc reported errors:\n${types.output.slice(0, 4000)}`)
-}
-
-// 4. Effect diagnostics on the edited file: floating Effects, missing
-//    contexts, and generator slips surface now, not at check time.
-const diagnostics = run(
-  "effect-tsgo",
-  ["diagnostics", "--file", rel, "--strict", "--format", "text"],
-  25_000,
-)
-// Any failure blocks — a crashed or misconfigured diagnostics run is not a
-// clean one; the output says which.
-if (!diagnostics.ok) {
-  block(`effect diagnostics for ${rel}:\n${diagnostics.output.slice(0, 4000)}`)
 }

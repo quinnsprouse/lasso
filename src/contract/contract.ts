@@ -4,14 +4,9 @@ import type { GuideTopic } from "../guides/catalog.generated.ts"
 import type { NextAction } from "../output/guidance.ts"
 
 /**
- * The CommandContract is the single source of truth for the CLI surface.
- * Everything else — the parser, help, `describe`, JSON Schema, docs — is
- * generated from or validated against its normalized form (see surface.ts).
- *
- * Mutations are structurally plan → confirm → apply: `plan` derives a
- * self-contained execution plan (no side effects), `apply` receives ONLY the
- * confirmed plan. Anything that changes what apply does must live in the
- * plan, because the confirmation token binds the plan and nothing else.
+ * Generates the parser, help, describe, and JSON Schema through surface.ts.
+ * Mutation plans contain everything apply needs. Confirmation tokens bind
+ * the command, schema version, and encoded plan; apply never sees raw input.
  */
 
 interface ParamBase {

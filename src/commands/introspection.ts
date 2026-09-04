@@ -5,14 +5,7 @@ import { describeCli, schemaDocument } from "../contract/jsonschema.ts"
 import { Errors } from "../errors.ts"
 import { CLI_NAME, CLI_VERSION } from "../meta.ts"
 
-/**
- * Runtime introspection: `describe` frees agents from parsing --help text,
- * `schema` publishes standalone JSON Schema for every command surface. Both
- * work with no auth, no network, no config, and no side effects.
- *
- * Built as a factory over the roster (late-bound, so the roster can include
- * these very commands without a circular value dependency).
- */
+// Read the roster lazily so describe/schema can include their own definitions.
 export const makeIntrospection = (
   roster: () => ReadonlyArray<AnyContract>,
 ): { describe: QueryContract<any, any>; schema: QueryContract<any, any> } => ({

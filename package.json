@@ -29,7 +29,6 @@
     "fmt": "biome format --write .",
     "fmt:check": "biome format .",
     "typecheck": "tsc --noEmit",
-    "effect:diagnostics": "effect-tsgo diagnostics --project tsconfig.json --strict",
     "knip": "knip",
     "setup": "lefthook install",
     "test:e2e": "vitest run test/e2e",

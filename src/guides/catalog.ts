@@ -3,21 +3,7 @@ import type { AnyContract } from "../contract/contract.ts"
 import type { GuideEntry, GuideTopic } from "./catalog.generated.ts"
 import { GUIDE_TOPICS } from "./catalog.generated.ts"
 
-/**
- * The authored guide catalog: the CLI's own version-matched documentation for
- * knowledge an agent cannot derive from `describe` or `schema` — mental
- * models, expected outputs, workflow order, semantics. Topics are Markdown in
- * guides/topics/, inlined into the committed catalog.generated.ts by
- * scripts/guides.mjs (the Fast profile fails when it is stale), so the
- * shipped binary carries exactly the topics its version was built with.
- *
- * Admission rule for a topic: an agent mid-task would fetch it to build a
- * model, and it would be wrong to bake that model into every error string.
- * Anything derivable from the command surface belongs in `describe`, not here.
- *
- * Which commands a topic covers is derived from the contracts' `guides`
- * declarations (one owner per fact), never from topic metadata.
- */
+// Markdown is embedded by scripts/guides.mjs; command references come from the roster.
 
 export type { GuideEntry, GuideTopic }
 

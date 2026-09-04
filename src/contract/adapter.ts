@@ -1,4 +1,3 @@
-// oxlint-disable-next-line effecttsgo/node-builtin-import -- the stderr-bound console is the output shim itself
 import { Console as NodeConsole } from "node:console"
 import { randomUUID } from "node:crypto"
 import { Console, Effect, Layer, Schema } from "effect"
@@ -22,12 +21,7 @@ import { finalizeGuidance, formatArgs, withMachineFormat, withoutFlag } from "./
 import { AppError as AppErrorClass } from "../errors.ts"
 import type { GuideTopic } from "../guides/catalog.generated.ts"
 
-/**
- * Maps CommandContracts onto the effect/unstable/cli parser. This module is
- * the ONLY one that imports the parser (lint-enforced); everything it builds
- * derives from the normalized CommandSurface, so the parser can never accept
- * a surface that `describe` and `schema` do not advertise.
- */
+// The only parser import boundary; commands are built from the normalized contracts.
 
 /** Control-flow signal: the outcome was already rendered; exit with this code. */
 export class ExitSignal extends Schema.TaggedError<ExitSignal>()("ExitSignal", {
@@ -138,11 +132,7 @@ const encodeOutput = (contract: AnyContract, data: unknown): Effect.Effect<unkno
     ),
   )
 
-/**
- * Projection is validated against the static field inventory — behavior is
- * identical for empty and populated collections — and applied to ENCODED
- * rows, so JSON, NDJSON, and projection can never disagree.
- */
+// Validate against declared fields even for empty collections, then project encoded rows.
 const project = (
   surface: CommandSurface,
   rows: ReadonlyArray<Record<string, unknown>>,
@@ -182,10 +172,7 @@ const project = (
   )
 }
 
-/**
- * A failure raised by a command carries the command's declared guides when it
- * names none of its own: a failure is exactly when an agent may lack the model.
- */
+// An explicit guides array, including [], overrides the command's defaults.
 const withCommandGuides =
   (surface: CommandSurface) =>
   (error: AppError): AppError =>
@@ -202,228 +189,224 @@ const withCommandGuides =
           guides: surface.guides,
         })
 
-const runQuery = (
+const runQuery = Effect.fn("runQuery")(function* (
   surface: CommandSurface,
   all: ReadonlyArray<CommandSurface>,
   raw: Record<string, unknown>,
-): Handled =>
-  Effect.gen(function* () {
-    const contract = surface.contract as QueryContract<
-      Record<string, ParamSpec>,
-      unknown,
-      AppServices
-    >
-    const renderer = yield* Renderer
-    const { domain, controls } = splitInput(surface, raw)
+): Effect.fn.Return<void, AppError | ExitSignal, AppServices | Renderer> {
+  const contract = surface.contract as QueryContract<
+    Record<string, ParamSpec>,
+    unknown,
+    AppServices
+  >
+  const renderer = yield* Renderer
+  const { domain, controls } = splitInput(surface, raw)
 
-    if (controls.fields !== undefined && renderer.mode.format === "text") {
-      return yield* Errors.invalidUsage({
-        message: "--fields projection requires a machine format",
-        fix: "add --json or --format ndjson",
-        next: DISCOVER,
+  if (controls.fields !== undefined && renderer.mode.format === "text") {
+    return yield* Errors.invalidUsage({
+      message: "--fields projection requires a machine format",
+      fix: "add --json or --format ndjson",
+      next: DISCOVER,
+    })
+  }
+
+  const data = yield* contract
+    .handler(domain as InputOf<Record<string, ParamSpec>>)
+    .pipe(Effect.mapError(withCommandGuides(surface)))
+  const encoded = yield* encodeOutput(contract, data)
+  // Success offers next moves; guides are reserved for decisions and failures.
+  const guidance = finalizeGuidance(all, {
+    next: contract.next?.({ input: domain as InputOf<Record<string, ParamSpec>>, data }),
+  })
+  const rows = contract.collection?.items(encoded)
+  if (rows !== undefined) {
+    const inventory = new Set<string>(contract.collection?.fields ?? [])
+    const stray = rows.flatMap((row) => Object.keys(row)).find((key) => !inventory.has(key))
+    if (stray !== undefined) {
+      return yield* Errors.invalidData({
+        message: `collection row field "${stray}" is not in the declared fields inventory`,
+        fix: `add "${stray}" to the collection.fields of "${surface.name}"`,
       })
     }
+  }
 
-    const data = yield* contract
-      .handler(domain as InputOf<Record<string, ParamSpec>>)
-      .pipe(Effect.mapError(withCommandGuides(surface)))
-    const encoded = yield* encodeOutput(contract, data)
-    // A plain success carries the contract's next move only: the guides an
-    // agent needs are advertised by describe and offered where the model
-    // matters (failures, confirmations, dry runs).
-    const guidance = finalizeGuidance(all, {
-      next: contract.next?.({ input: domain as InputOf<Record<string, ParamSpec>>, data }),
-    })
-    const rows = contract.collection?.items(encoded)
-    if (rows !== undefined) {
-      const inventory = new Set<string>(contract.collection?.fields ?? [])
-      const stray = rows.flatMap((row) => Object.keys(row)).find((key) => !inventory.has(key))
-      if (stray !== undefined) {
-        return yield* Errors.invalidData({
-          message: `collection row field "${stray}" is not in the declared fields inventory`,
-          fix: `add "${stray}" to the collection.fields of "${surface.name}"`,
-        })
-      }
-    }
-
-    if (controls.fields !== undefined && rows !== undefined) {
-      const projected = yield* project(surface, rows, controls.fields)
-      yield* renderer
-        .emit({
-          kind: "ok",
-          data: { items: projected, count: projected.length },
-          items: projected,
-          ...guidance,
-        })
-        .pipe(Effect.orDie)
-      return
-    }
-
+  if (controls.fields !== undefined && rows !== undefined) {
+    const projected = yield* project(surface, rows, controls.fields)
     yield* renderer
       .emit({
         kind: "ok",
-        data: encoded,
-        ...(contract.renderText !== undefined ? { text: contract.renderText(data) } : {}),
-        ...(rows !== undefined ? { items: rows } : {}),
+        data: { items: projected, count: projected.length },
+        items: projected,
         ...guidance,
       })
       .pipe(Effect.orDie)
-  })
+    return
+  }
 
-const runMutation = (
+  yield* renderer
+    .emit({
+      kind: "ok",
+      data: encoded,
+      ...(contract.renderText !== undefined ? { text: contract.renderText(data) } : {}),
+      ...(rows !== undefined ? { items: rows } : {}),
+      ...guidance,
+    })
+    .pipe(Effect.orDie)
+})
+
+const runMutation = Effect.fn("runMutation")(function* (
   surface: CommandSurface,
   all: ReadonlyArray<CommandSurface>,
   raw: Record<string, unknown>,
-): Handled =>
-  Effect.gen(function* () {
-    const contract = surface.contract as MutationContract<
-      Record<string, ParamSpec>,
-      unknown,
-      unknown,
-      AppServices,
-      AppServices
-    >
-    const renderer = yield* Renderer
-    const { domain, controls } = splitInput(surface, raw)
+): Effect.fn.Return<void, AppError | ExitSignal, AppServices | Renderer> {
+  const contract = surface.contract as MutationContract<
+    Record<string, ParamSpec>,
+    unknown,
+    unknown,
+    AppServices,
+    AppServices
+  >
+  const renderer = yield* Renderer
+  const { domain, controls } = splitInput(surface, raw)
 
-    // Contradictory control combinations fail before planning.
-    if (controls.dryRun && (controls.yes || controls.confirm !== undefined)) {
-      return yield* Errors.invalidUsage({
-        message: "--dry-run cannot be combined with --yes or --confirm",
-        fix: "preview with --dry-run alone, then apply with --yes or --confirm",
-        next: DISCOVER,
-      })
-    }
-    if (controls.yes && controls.confirm !== undefined) {
-      return yield* Errors.invalidUsage({
-        message: "--yes and --confirm are mutually exclusive",
-        fix: "use --confirm <token> to apply a previewed plan, or --yes to skip the preview",
-        next: DISCOVER,
-      })
-    }
-
-    const original = renderer.mode.argv
-    const machine = formatArgs(renderer.mode.format)
-    /** The same invocation without --confirm: a fresh preview against current state. */
-    const replan = withMachineFormat(withoutFlag(original, "--confirm", true), machine)
-    const planEffect = contract
-      .plan(domain as InputOf<Record<string, ParamSpec>>)
-      .pipe(Effect.mapError(withCommandGuides(surface)))
-    const rawPlan = yield* controls.confirm === undefined
-      ? planEffect
-      : planEffect.pipe(
-          Effect.catch((cause) =>
-            Errors.staleConfirmation({
-              message: `the previewed plan can no longer be produced: ${cause.message}`,
-              fix: "re-run without --confirm to get a fresh plan",
-              details: { code: cause.code },
-              next: [{ message: "re-plan against the current state", args: replan }],
-              ...(cause.guides !== undefined
-                ? { guides: cause.guides as ReadonlyArray<GuideTopic> }
-                : {}),
-            }),
-          ),
-        )
-    const encodedPlan = yield* Schema.encodeUnknownEffect(contract.planSchema)(rawPlan).pipe(
-      Effect.mapError((cause) =>
-        Errors.invalidData({
-          message: `plan failed its declared schema: ${cause.message}`,
-          fix: `this is a bug in "${surface.name}": make its plan return data matching planSchema`,
-        }),
-      ),
-    )
-    // The token binds command identity, protocol version, and the full plan.
-    const token = planToken({
-      command: surface.name,
-      schemaVersion: SCHEMA_VERSION,
-      plan: encodedPlan,
+  // Contradictory control combinations fail before planning.
+  if (controls.dryRun && (controls.yes || controls.confirm !== undefined)) {
+    return yield* Errors.invalidUsage({
+      message: "--dry-run cannot be combined with --yes or --confirm",
+      fix: "preview with --dry-run alone, then apply with --yes or --confirm",
+      next: DISCOVER,
     })
-    // What was previewed and hashed is the ENCODED plan. Apply (and the human
-    // preview) receive its decoded form, never the raw value the plan function
-    // returned, so nothing the schema does not carry can reach apply.
-    const plan = yield* Schema.decodeUnknownEffect(contract.planSchema)(encodedPlan).pipe(
-      Effect.mapError((cause) =>
-        Errors.invalidData({
-          message: `plan does not round-trip through its schema: ${cause.message}`,
-          fix: `this is a bug in "${surface.name}": make planSchema encode and decode the plan losslessly`,
-        }),
-      ),
-    )
+  }
+  if (controls.yes && controls.confirm !== undefined) {
+    return yield* Errors.invalidUsage({
+      message: "--yes and --confirm are mutually exclusive",
+      fix: "use --confirm <token> to apply a previewed plan, or --yes to skip the preview",
+      next: DISCOVER,
+    })
+  }
 
-    if (controls.dryRun) {
-      // Preview-first: the next move is the confirmation flow, never a generated --yes.
-      const guidance = finalizeGuidance(all, {
-        next: [
-          {
-            message: "re-run without --dry-run to get a confirmation token",
-            args: withMachineFormat(withoutFlag(original, "--dry-run"), machine),
-          },
-        ],
-        guides: surface.guides,
+  const original = renderer.mode.argv
+  const machine = formatArgs(renderer.mode.format)
+  /** The same invocation without --confirm: a fresh preview against current state. */
+  const replan = withMachineFormat(withoutFlag(original, "--confirm", true), machine)
+  const planEffect = contract
+    .plan(domain as InputOf<Record<string, ParamSpec>>)
+    .pipe(Effect.mapError(withCommandGuides(surface)))
+  const rawPlan = yield* controls.confirm === undefined
+    ? planEffect
+    : planEffect.pipe(
+        Effect.catch((cause) =>
+          Errors.staleConfirmation({
+            message: `the previewed plan can no longer be produced: ${cause.message}`,
+            fix: "re-run without --confirm to get a fresh plan",
+            details: { code: cause.code },
+            next: [{ message: "re-plan against the current state", args: replan }],
+            ...(cause.guides !== undefined
+              ? { guides: cause.guides as ReadonlyArray<GuideTopic> }
+              : {}),
+          }),
+        ),
+      )
+  const encodedPlan = yield* Schema.encodeUnknownEffect(contract.planSchema)(rawPlan).pipe(
+    Effect.mapError((cause) =>
+      Errors.invalidData({
+        message: `plan failed its declared schema: ${cause.message}`,
+        fix: `this is a bug in "${surface.name}": make its plan return data matching planSchema`,
+      }),
+    ),
+  )
+  // The token binds command identity, protocol version, and the full plan.
+  const token = planToken({
+    command: surface.name,
+    schemaVersion: SCHEMA_VERSION,
+    plan: encodedPlan,
+  })
+  // What was previewed and hashed is the ENCODED plan. Apply (and the human
+  // preview) receive its decoded form, never the raw value the plan function
+  // returned, so nothing the schema does not carry can reach apply.
+  const plan = yield* Schema.decodeUnknownEffect(contract.planSchema)(encodedPlan).pipe(
+    Effect.mapError((cause) =>
+      Errors.invalidData({
+        message: `plan does not round-trip through its schema: ${cause.message}`,
+        fix: `this is a bug in "${surface.name}": make planSchema encode and decode the plan losslessly`,
+      }),
+    ),
+  )
+
+  if (controls.dryRun) {
+    // Preview-first: the next move is the confirmation flow, never a generated --yes.
+    const guidance = finalizeGuidance(all, {
+      next: [
+        {
+          message: "re-run without --dry-run to get a confirmation token",
+          args: withMachineFormat(withoutFlag(original, "--dry-run"), machine),
+        },
+      ],
+      guides: surface.guides,
+    })
+    yield* renderer
+      .emit({
+        kind: "ok",
+        data: { dryRun: true, plan: encodedPlan },
+        ...(contract.renderPlanText !== undefined
+          ? { text: `${contract.renderPlanText(plan)}\n(dry run — nothing was changed)` }
+          : {}),
+        ...guidance,
       })
-      yield* renderer
-        .emit({
-          kind: "ok",
-          data: { dryRun: true, plan: encodedPlan },
-          ...(contract.renderPlanText !== undefined
-            ? { text: `${contract.renderPlanText(plan)}\n(dry run — nothing was changed)` }
-            : {}),
-          ...guidance,
-        })
-        .pipe(Effect.orDie)
-      return
-    }
+      .pipe(Effect.orDie)
+    return
+  }
 
-    if (controls.confirm !== undefined) {
-      if (controls.confirm !== token) {
-        return yield* Errors.staleConfirmation({
-          message:
-            "the confirmation token does not match the current plan — state changed since the plan was produced",
-          fix: "re-run without --confirm to get a fresh plan, then confirm with the new token",
-          next: [{ message: "re-plan against the current state", args: replan }],
-          ...(surface.guides.length > 0 ? { guides: surface.guides } : {}),
-        })
-      }
-    } else if (!controls.yes) {
-      // The canonical continuation pins the machine format explicitly so a
-      // replay under a TTY still produces machine output. Controls are
-      // inserted BEFORE any -- terminator so the replay parses verbatim.
-      const confirmArgs = withMachineFormat(original, [
-        "--confirm",
+  if (controls.confirm !== undefined) {
+    if (controls.confirm !== token) {
+      return yield* Errors.staleConfirmation({
+        message:
+          "the confirmation token does not match the current plan — state changed since the plan was produced",
+        fix: "re-run without --confirm to get a fresh plan, then confirm with the new token",
+        next: [{ message: "re-plan against the current state", args: replan }],
+        ...(surface.guides.length > 0 ? { guides: surface.guides } : {}),
+      })
+    }
+  } else if (!controls.yes) {
+    // The canonical continuation pins the machine format explicitly so a
+    // replay under a TTY still produces machine output. Controls are
+    // inserted BEFORE any -- terminator so the replay parses verbatim.
+    const confirmArgs = withMachineFormat(original, [
+      "--confirm",
+      token,
+      ...(machine.length > 0 ? machine : ["--json"]),
+    ])
+    const guidance = finalizeGuidance(all, {
+      next: [{ message: "apply exactly this plan", args: confirmArgs }],
+      guides: surface.guides,
+    })
+    yield* renderer
+      .emit({
+        kind: "confirmation",
+        plan: encodedPlan,
         token,
-        ...(machine.length > 0 ? machine : ["--json"]),
-      ])
-      const guidance = finalizeGuidance(all, {
-        next: [{ message: "apply exactly this plan", args: confirmArgs }],
-        guides: surface.guides,
-      })
-      yield* renderer
-        .emit({
-          kind: "confirmation",
-          plan: encodedPlan,
-          token,
-          confirmArgs,
-          ...(contract.renderPlanText !== undefined ? { text: contract.renderPlanText(plan) } : {}),
-          ...guidance,
-        })
-        .pipe(Effect.orDie)
-      return yield* new ExitSignal({ code: 4 })
-    }
-
-    const data = yield* contract.apply(plan).pipe(Effect.mapError(withCommandGuides(surface)))
-    const encoded = yield* encodeOutput(contract, data)
-    const guidance = finalizeGuidance(all, {
-      next: contract.next?.({ input: domain as InputOf<Record<string, ParamSpec>>, data }),
-    })
-    yield* renderer
-      .emit({
-        kind: "ok",
-        data: encoded,
-        ...(contract.renderText !== undefined ? { text: contract.renderText(data) } : {}),
+        confirmArgs,
+        ...(contract.renderPlanText !== undefined ? { text: contract.renderPlanText(plan) } : {}),
         ...guidance,
       })
       .pipe(Effect.orDie)
+    return yield* new ExitSignal({ code: 4 })
+  }
+
+  const data = yield* contract.apply(plan).pipe(Effect.mapError(withCommandGuides(surface)))
+  const encoded = yield* encodeOutput(contract, data)
+  const guidance = finalizeGuidance(all, {
+    next: contract.next?.({ input: domain as InputOf<Record<string, ParamSpec>>, data }),
   })
+  yield* renderer
+    .emit({
+      kind: "ok",
+      data: encoded,
+      ...(contract.renderText !== undefined ? { text: contract.renderText(data) } : {}),
+      ...guidance,
+    })
+    .pipe(Effect.orDie)
+})
 
 const toCommand = (surface: CommandSurface, all: ReadonlyArray<CommandSurface>) => {
   const handler = (raw: Record<string, unknown>): Handled =>
@@ -492,13 +475,8 @@ export const runRoot = (
  */
 const machineFormatterBase = CliOutput.defaultFormatter({ colors: false })
 
-// The parser prints `--version` through the Console. That string is the one
-// legitimate parser write to stdout, so the formatter marks it with a
-// per-process random prefix (a handler cannot forge it) and the shim lets
-// exactly that through. Every other Console method — log, debug, info, warn,
-// table, dir, group, … — is bound to stderr by construction, so a stray
-// `Console.debug` in a handler can never land inside the envelope stream.
-// Whitespace-only log writes (parser chatter) are dropped.
+// Mark the parser's version line so only that Console write can reach stdout.
+// All other Console methods go to stderr; blank parser chatter is dropped.
 const VERSION_MARK = `\u0000${randomUUID()}\u0000`
 
 const stderrConsole = new NodeConsole({ stdout: process.stderr, stderr: process.stderr })
@@ -555,11 +533,7 @@ interface AppErrorLike {
   readonly fix: string
 }
 
-/**
- * Deliberately no "did you mean" suggestions: fuzzy recovery hints cause
- * agents to make false correction attempts. Unknown input is a hard failure
- * with a deterministic discovery path (`describe`).
- */
+// Use deterministic discovery hints instead of fuzzy command suggestions.
 const usageErrorFrom = (error: CliError.CliError, binName: string): AppErrorLike => {
   switch (error._tag) {
     case "UnrecognizedOption":
@@ -610,8 +584,6 @@ const usageErrorFrom = (error: CliError.CliError, binName: string): AppErrorLike
         fix: `run ${binName} describe --json for machine-readable help`,
       }
   }
-  // Unreachable: the switch is exhaustive over the closed CliError union.
-  return { message: String(error), fix: `run ${binName} describe --json to list valid inputs` }
 }
 
 /** Translates parser errors into kit-owned failures; returns null for non-parser errors. */

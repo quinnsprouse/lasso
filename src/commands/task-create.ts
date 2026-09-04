@@ -4,12 +4,7 @@ import { StoreReader, StoreWriter } from "../services/store.ts"
 import { Errors } from "../errors.ts"
 import { defineMutation } from "../contract/contract.ts"
 
-/**
- * The mutation pattern. `plan` runs with read capabilities only and produces
- * a SELF-CONTAINED plan — including the no-op case, so `--if-not-exists`
- * changes the plan (and therefore the confirmation token), never apply-time
- * behavior. `apply` sees nothing but the confirmed plan.
- */
+// The no-op decision belongs in the confirmed plan, not in apply-time flags.
 
 const CreatePlan = Schema.Union([
   Schema.Struct({
@@ -56,8 +51,6 @@ export const taskCreate = defineMutation({
     "invalid_config",
     "transient_failure",
   ],
-  // The models an agent needs that the surface cannot express: how the id is
-  // derived from the title, and what replay and --if-not-exists mean.
   guides: ["task-ids", "mutation-replay"],
   examples: [
     {
@@ -79,7 +72,6 @@ export const taskCreate = defineMutation({
     }
     const id = taskId(title)
     if (id === "task_") {
-      // The derivation keeps only ASCII letters and digits (see guide task-ids).
       return yield* Errors.invalidData({
         message: `task title "${title}" yields no identifier: it has no ASCII letters or digits`,
         fix: "include at least one ASCII letter or digit in the title",
@@ -108,10 +100,7 @@ export const taskCreate = defineMutation({
         ],
       })
     }
-    // Plans must be DETERMINISTIC for identical state and input — replaying
-    // confirmArgs recomputes the plan and compares tokens. Apply-assigned
-    // metadata (like createdAt) therefore stays out of the plan: the token
-    // binds intent, not server-generated timestamps.
+    // Assign timestamps in apply so identical plans keep the same confirmation token.
     return {
       action: "create_task" as const,
       task: { id, title, status: "open" as const },
@@ -120,8 +109,7 @@ export const taskCreate = defineMutation({
   apply: Effect.fn("taskCreate.apply")(function* (plan) {
     const writer = yield* StoreWriter
     if (plan.action === "no_op") {
-      // Returning null from the transform keeps the store untouched: a no-op
-      // must not rewrite the file (watchers and other agents would see a write).
+      // null avoids a write that would notify file watchers on a no-op.
       const tasks = yield* writer.modify(() => null)
       const existing = tasks.find((task) => task.id === plan.taskId)
       if (existing === undefined) {
@@ -152,7 +140,6 @@ export const taskCreate = defineMutation({
     const created = tasks.find((existing) => existing.id === task.id)
     return { created: true, task: created ?? task }
   }),
-  // After a write, the natural next move is to see it in the list.
   next: ({ data }) => [
     {
       message: data.created ? "see the new task in the list" : "see the existing task",

@@ -5,13 +5,7 @@ import { Errors } from "../errors.ts"
 import { findGuide, guideInventory, GuideSummarySchema } from "../guides/catalog.ts"
 import { CLI_NAME } from "../meta.ts"
 
-/**
- * The guide commands: version-matched, offline, no state. `guide list` is the
- * inventory an agent budgets context with (brief + bytes per topic);
- * `guide get` serves one topic, in full or as its brief. Built as a factory
- * over the roster (late-bound) because the per-topic command list is derived
- * from the contracts that declare each topic.
- */
+// Read the roster lazily so it can include these commands without a circular value dependency.
 
 export const makeGuideCommands = (
   roster: () => ReadonlyArray<AnyContract>,

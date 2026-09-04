@@ -1,12 +1,7 @@
 name: release
 
-# npm trusted publishing (OIDC): once the package exists on npmjs.com,
-# configure this repository + workflow as its trusted publisher and no
-# NPM_TOKEN is needed — provenance attestations are generated automatically.
-# npm cannot register a trusted publisher for a package that has never been
-# published, so the FIRST release is published from a terminal (see
-# CONTRIBUTING.md, Releasing); every release after that goes through here.
-# Provenance requires the `repository` field in package.json to match this repo.
+# Bootstrap the first version and configure OIDC in CONTRIBUTING.md, Releasing.
+# The trusted publisher must allow direct `npm publish` for this workflow.
 on:
   push:
     tags: ["v*"]
@@ -14,7 +9,6 @@ on:
 permissions:
   contents: read
   id-token: write
-  attestations: write
 
 # One release at a time; a second tag waits for the first to finish.
 concurrency:
@@ -31,8 +25,7 @@ jobs:
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: 24
-          # No package-manager cache on the release path: the publish must be
-          # built from the registry's bytes, not a cached copy.
+          package-manager-cache: false
           registry-url: https://registry.npmjs.org
       - run: npm ci
       # The tag, package.json, package-lock, and the compiled CLI_VERSION must
@@ -69,14 +62,8 @@ jobs:
           test "$(node dist/bin.cjs --version --json | node -e 'process.stdout.write(JSON.parse(require("fs").readFileSync(0,"utf8")).data.version)')" = "${TAG#v}"
         env:
           TAG: ${{ github.ref_name }}
-      # Pack once, attest THAT tarball, publish THAT tarball: the attestation
-      # and the published artifact are the same bytes. Attest before publishing
-      # so a failed attestation never leaves an unattested package public.
+      # Publish this tarball. npm generates provenance for public repos/packages via OIDC.
       - name: pack
         id: pack
         run: echo "tarball=$(npm pack --json | node -e 'process.stdout.write(JSON.parse(require(\"fs\").readFileSync(0,\"utf8\"))[0].filename)')" >> "$GITHUB_OUTPUT"
-      - name: attest the tarball
-        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
-        with:
-          subject-path: ${{ steps.pack.outputs.tarball }}
       - run: npm publish "${{ steps.pack.outputs.tarball }}"

@@ -2,20 +2,17 @@ import { once } from "node:events"
 import { mkdtemp, rm } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
-import { execa } from "execa"
+import { execaNode } from "execa"
 import { afterEach, beforeEach, describe, expect, it } from "vitest"
 
-/**
- * Black-box tests against the BUILT artifact (dist/bin.cjs) — the thing that
- * ships, not the source. Runs in the Push profile, after `tsdown`.
- */
+// Run the built artifact after tsdown, using the same Node executable as the test runner.
 
 const BIN = join(import.meta.dirname, "..", "..", "dist", "bin.cjs")
 
 let cwd: string
 
 const run = (args: ReadonlyArray<string>, options: { env?: Record<string, string> } = {}) =>
-  execa("node", [BIN, ...args], {
+  execaNode(BIN, args, {
     cwd,
     reject: false,
     env: { ...options.env },

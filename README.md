@@ -42,7 +42,7 @@ Read the [output protocol](docs/agents/PROTOCOL.md) for envelopes, NDJSON, exit 
 
 ```bash
 npm run dev -- <args>                        # run from source
-npm run check                                # format, lint, types, diagnostics, test hygiene, guide catalog, unit and contract tests
+npm run check                                # format, type-aware lint, types, guide catalog, unit and contract tests
 npm run check:push                           # add build, dead code, e2e, and pack checks
 npm run check:ci                             # add coverage and the Starter Contract
 npm run build                                # build dist/bin.cjs

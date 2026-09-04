@@ -29,7 +29,7 @@ The hash that binds `{command, schemaVersion, plan}` to a confirmation. A change
 _Avoid_: nonce, session token
 
 **Verification Profile**:
-A named depth of checking. Fast is format, lint, types, Effect diagnostics, test hygiene, guide-catalog freshness, and the unit and contract tests. Push adds build, dead code, e2e, and pack smoke. CI adds coverage and the Starter Contract. Each contains the previous. One definition in `scripts/verify.mjs` drives all three: the pre-push hook runs Push, CI runs CI, so a green Push locally means the same steps pass in CI.
+A named depth of checking. Fast is format, type-aware lint with Effect and Vitest rules, types, guide-catalog freshness, and the unit and contract tests. Push adds build, dead code, e2e, and pack smoke. CI adds coverage and the Starter Contract. Each contains the previous. One definition in `scripts/verify.mjs` drives all three: the pre-push hook runs Push, CI runs CI, so a green Push locally means the same steps pass in CI.
 _Avoid_: test suite, pipeline
 
 **Starter Contract**:

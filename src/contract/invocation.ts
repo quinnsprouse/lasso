@@ -1,14 +1,7 @@
 import type { CommandSurface } from "./surface.ts"
 
-/**
- * The single owner of two facts the parser also knows: which global flags
- * exist (with their values), and what makes an argv a real invocation of
- * this CLI. `describe` lists the flags from here; `bin.ts` resolves the
- * command path with `resolveCommandPath`; the runtime validates every `next`
- * action, the guide invariants every fenced command, and the skill test
- * every router row with `validateInvocation`. One definition, so none of
- * them can name a command or flag the parser would reject.
- */
+// Mirrors parser globals for describe, help resolution, and guidance validation.
+// Keep this list aligned with the pinned parser when upgrading Effect.
 
 export interface GlobalFlag {
   readonly cliName: string

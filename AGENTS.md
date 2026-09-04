@@ -17,13 +17,13 @@ What is demo and what is kit: `src/domain/`, `src/commands/task-*.ts`, `guides/t
 
 ## Verification
 
-- `npm run check` — Fast: format, type-aware lint, types, Effect diagnostics, test hygiene, guide-catalog freshness, unit and contract tests. Seconds.
+- `npm run check` — Fast: format, type-aware lint with Effect and Vitest rules, types, guide-catalog freshness, unit and contract tests. Seconds.
 - `npm run check:push` — Push: Fast plus build, dead code, e2e against `dist`, and packed-package smoke. The pre-push hook runs this.
 - `npm run check:ci` — CI: Push plus coverage and the Starter Contract (`npm run test:starter`; needs a commit, it archives HEAD).
 - One test file: `node node_modules/vitest/vitest.mjs run test/unit/token.test.ts` (`npx vitest` is refused: unpinned executor). E2E needs `npm run build` first.
 - Debug from source: `node --inspect-brk src/bin.ts <args>`; the shipped artifact: `npm run build && node --inspect-brk dist/bin.cjs <args>`.
 
-Never skip, focus, or `.todo` a test to get green; test hygiene fails the Fast profile on any of them. When the post-edit hook reports a failure, repair the file it names and run `npm run check`. When it reports an incomplete toolchain, run `npm ci`. When the Stop hook reports the tree is red, fix that before finishing.
+Never skip, focus, or `.todo` a test to get green; Vitest lint rules fail the Fast profile on any of them, and `allowOnly: false` rejects focused tests even when run directly. When the post-edit hook reports a failure, repair the file it names and run `npm run check`. When it reports an incomplete toolchain, run `npm ci`. When the Stop hook reports the tree is red, fix that before finishing.
 
 ## Rules
 
@@ -68,7 +68,7 @@ Before writing Effect code, read `node_modules/effect/AGENTS.md`; for API detail
 `.claude/hooks/` backs the rules while you work; details in [docs/agents/GUARDS.md](docs/agents/GUARDS.md).
 
 - `guard.mjs` checks direct commands for common hook bypasses, destructive git operations, unpinned tool execution, and deletion of git metadata or the lockfile. It also protects generated files from Edit/Write. It does not interpret shell programs; see GUARDS.md for its scope.
-- `post-edit.mjs` formats edited files and lints scripts. Full typechecking and Effect diagnostics after each TypeScript edit are opt-in with `LASSO_POST_EDIT_FULL=1`; `npm run check` always runs both.
+- `post-edit.mjs` formats edited files and lints scripts. Effect rules run with lint. Full project typechecking after each TypeScript edit is opt-in with `LASSO_POST_EDIT_FULL=1`; `npm run check` always runs it.
 - `session-start.mjs` prints the doctor's failing checks (or one healthy line); `stop-check.mjs` runs the Fast profile when the tree is dirty and refuses to end the turn while it is red.
 
 Scripts and the post-edit hook resolve every tool through `scripts/lib/toolchain.mjs`; the git hooks invoke pinned `node_modules` entries directly; the session and stop hooks invoke repository scripts. Nothing runs through `npx`.

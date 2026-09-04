@@ -18,9 +18,9 @@ Edit/Write checks protect `dist/`, `coverage/`, `node_modules/`, `.git/`, `.lass
 ## Feedback hooks
 
 - `session-start.mjs` runs the doctor and prints failures, or one healthy line. It never blocks.
-- `post-edit.mjs` formats edited TypeScript, JavaScript, and JSON files and lints scripts. Set `LASSO_POST_EDIT_FULL=1` to also run project typechecking and file-scoped Effect diagnostics after TypeScript edits. These always run in `npm run check`.
+- `post-edit.mjs` formats edited TypeScript, JavaScript, and JSON files and lints scripts. Effect diagnostics run as part of lint. Set `LASSO_POST_EDIT_FULL=1` to also run project typechecking after TypeScript edits. `npm run check` always runs both lint and typechecking.
 - `stop-check.mjs` runs `npm run check` on a dirty tree. A failure returns the diagnostics; `stop_hook_active` prevents a loop.
 
-Post-edit failures report problems after the edit; they do not undo it. A missing toolchain reports `npm ci`. The default post-edit budget is 15 seconds for formatting plus 30 for lint; optional checks bring it to 115 seconds within the 120-second hook timeout.
+Post-edit failures report problems after the edit; they do not undo it. A missing toolchain reports `npm ci`. The default post-edit budget is 15 seconds for formatting plus 30 for lint; optional typechecking brings it to 90 seconds within the 120-second hook timeout.
 
 All hooks resolve their repository from their script location, or use the payload's `cwd` when it identifies another Lasso worktree. Run `npm run check` after addressing feedback.

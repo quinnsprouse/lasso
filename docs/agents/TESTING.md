@@ -1,6 +1,8 @@
 # Testing
 
-Three suites, three purposes, at three depths: unit and contract tests run in Fast; e2e joins in Push; coverage and the Starter Contract join in CI. None may be skipped to get green — `scripts/test-hygiene.mjs` fails the Fast profile on any `.skip`, `.only`, `.todo`, or focused form.
+Unit and contract tests run in Fast. Push adds e2e; CI adds coverage and the Starter Contract. Oxlint rejects skipped, focused, placeholder, and conditionally disabled tests. Vitest also rejects `.only` at runtime with `allowOnly: false`.
+
+The Vitest lint rules allow two `expect` arguments because the second is a diagnostic message. Conditional assertions remain allowed for contract invariants that inspect different command kinds. Test-title wording is not a lint concern.
 
 ## Unit (`test/unit/`) — logic through fake layers
 

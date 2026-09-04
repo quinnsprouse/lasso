@@ -1,13 +1,87 @@
 {
   "$schema": "./node_modules/@effect/tsgo/oxlint-schema.json",
+  "options": {
+    "typeAware": true,
+    "denyWarnings": true,
+    "reportUnusedDisableDirectives": "error"
+  },
   "categories": {
     "correctness": "error",
     "suspicious": "error",
     "perf": "warn"
   },
-  "plugins": ["typescript", "oxc", "unicorn", "import"],
+  "plugins": ["typescript", "oxc", "unicorn", "import", "vitest"],
   "rules": {
     "no-console": "error",
+    "vitest/no-disabled-tests": "error",
+    "vitest/no-focused-tests": "error",
+    "vitest/warn-todo": "error",
+    "vitest/valid-expect": ["error", { "maxArgs": 2 }],
+    "vitest/valid-title": "off",
+    "vitest/no-conditional-expect": "off",
+    "no-restricted-properties": [
+      "error",
+      {
+        "object": "Effect",
+        "property": "runPromise",
+        "message": "Run effects only in src/bin.ts; compose them elsewhere."
+      },
+      {
+        "object": "Effect",
+        "property": "runPromiseExit",
+        "message": "Run effects only in src/bin.ts; compose them elsewhere."
+      },
+      {
+        "object": "Effect",
+        "property": "runSync",
+        "message": "Run effects only in src/bin.ts; compose them elsewhere."
+      },
+      {
+        "object": "Effect",
+        "property": "runSyncExit",
+        "message": "Run effects only in src/bin.ts; compose them elsewhere."
+      },
+      {
+        "object": "Effect",
+        "property": "runFork",
+        "message": "Run effects only in src/bin.ts; compose them elsewhere."
+      },
+      {
+        "object": "Effect",
+        "property": "runCallback",
+        "message": "Run effects only in src/bin.ts; compose them elsewhere."
+      },
+      {
+        "object": "Effect",
+        "property": "runPromiseWith",
+        "message": "Run effects only in src/bin.ts; compose them elsewhere."
+      },
+      {
+        "object": "Effect",
+        "property": "runPromiseExitWith",
+        "message": "Run effects only in src/bin.ts; compose them elsewhere."
+      },
+      {
+        "object": "Effect",
+        "property": "runSyncWith",
+        "message": "Run effects only in src/bin.ts; compose them elsewhere."
+      },
+      {
+        "object": "Effect",
+        "property": "runSyncExitWith",
+        "message": "Run effects only in src/bin.ts; compose them elsewhere."
+      },
+      {
+        "object": "Effect",
+        "property": "runForkWith",
+        "message": "Run effects only in src/bin.ts; compose them elsewhere."
+      },
+      {
+        "object": "Effect",
+        "property": "runCallbackWith",
+        "message": "Run effects only in src/bin.ts; compose them elsewhere."
+      }
+    ],
     "typescript/consistent-return": "off",
     "eslint/no-underscore-dangle": [
       "error",
@@ -18,6 +92,20 @@
     "no-restricted-imports": [
       "error",
       {
+        "patterns": [
+          {
+            "group": ["effect/Effect"],
+            "message": "Import { Effect } from 'effect' so runtime boundaries stay lintable."
+          },
+          {
+            "group": ["effect/unstable/cli/**"],
+            "message": "Use command contracts; only the adapter imports the parser."
+          },
+          {
+            "group": ["effect/Console"],
+            "message": "Use Progress; Console bypasses the output protocol."
+          }
+        ],
         "paths": [
           {
             "name": "node:fs",
@@ -55,10 +143,17 @@
     {
       "files": ["src/bin.ts"],
       "rules": {
+        "no-restricted-properties": "off",
         "no-restricted-globals": "off",
         "no-restricted-imports": [
           "error",
           {
+            "patterns": [
+              {
+                "group": ["effect/unstable/cli/**"],
+                "message": "bin.ts consumes kit-owned adapter types only."
+              }
+            ],
             "paths": [
               {
                 "name": "node:fs",
@@ -81,6 +176,12 @@
         "no-restricted-imports": [
           "error",
           {
+            "patterns": [
+              {
+                "group": ["effect/Effect"],
+                "message": "Import { Effect } from 'effect' so runtime boundaries stay lintable."
+              }
+            ],
             "paths": [
               {
                 "name": "node:fs",
@@ -111,6 +212,7 @@
     {
       "files": ["scripts/**", "test/**", ".claude/**", "*.config.ts"],
       "rules": {
+        "no-restricted-properties": "off",
         "no-console": "off",
         "no-restricted-imports": "off",
         "typescript/no-unsafe-type-assertion": "off",
@@ -123,6 +225,16 @@
         "effecttsgo/async-function": "off",
         "effecttsgo/unsafe-effect-type-assertion": "off",
         "effecttsgo/any-unknown-in-error-context": "off"
+      }
+    },
+    {
+      "files": ["test/**"],
+      "rules": {
+        "no-restricted-properties": [
+          "error",
+          { "property": "skipIf", "message": "Tests must run in every supported environment." },
+          { "property": "runIf", "message": "Tests must run in every supported environment." }
+        ]
       }
     }
   ],
