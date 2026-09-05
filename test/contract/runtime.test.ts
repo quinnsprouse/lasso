@@ -571,6 +571,19 @@ describe("stdout purity against handler misbehavior", () => {
     vi.restoreAllMocks()
   })
 
+  it.each(["json", "ndjson"] as const)(
+    "version output is captured through the renderer in %s",
+    async (format) => {
+      const stdoutWrite = vi.spyOn(process.stdout, "write").mockImplementation(() => true)
+      const result = await invoke(["--version"], format)
+      expect(result.code).toBe(0)
+      const output = lines(result.stdout, format)
+      expect(output).toHaveLength(1)
+      expect(output[0]!.data).toEqual({ name: "lasso", version: "0.0.0" })
+      expect(stdoutWrite).not.toHaveBeenCalled()
+    },
+  )
+
   it("every Console method a handler can call lands on stderr, never in the envelope stream", async () => {
     const stdoutWrite = vi.spyOn(process.stdout, "write").mockImplementation(() => true)
     const stderrWrite = vi.spyOn(process.stderr, "write").mockImplementation(() => true)
@@ -671,8 +684,8 @@ describe("point-of-use guidance on the wire", () => {
     expect(result.status).toBe("ok")
     expect(result.next).toEqual([{ message: "valid", args: ["counter", "list", "--json"] }])
     expect(result.warnings).toEqual([
-      'dropped next action "bogus": "nonsense" is not a command',
-      'dropped next action "bad flag": flag --nope is not declared for "counter list"',
+      'dropped next action "bogus": unknown command "nonsense"',
+      'dropped next action "bad flag": unrecognized flag "--nope"',
     ])
   })
 

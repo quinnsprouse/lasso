@@ -112,7 +112,7 @@ export const ${exportName} = defineQuery({
       description: "Run ${commandName} and print the JSON envelope",
     },
   ],
-  // Replace with Effect.gen(function* () { … }) once the handler needs services.
+  // Use Effect.fn("${exportName}.handler")(function* () { … }) when the handler needs services.
   handler: () => Effect.succeed({ message: "implement me" }),
   renderText: (data) => data.message,
 })

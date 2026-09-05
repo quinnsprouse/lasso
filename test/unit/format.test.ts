@@ -106,3 +106,30 @@ describe("terminator and conflicts", () => {
     expect(negotiate({ ...base, argv: ["--", "--help"] }).helpRequested).toBe(false)
   })
 })
+
+describe("built-in output policy", () => {
+  it("allows the wizard only on an interactive text terminal", () => {
+    expect(negotiate({ ...base, argv: ["--wizard"] }).format).toBe("text")
+    expect(() => negotiate({ ...base, argv: ["--wizard", "--json"] })).toThrow(/interactive/)
+    expect(() => negotiate({ ...base, argv: ["--wizard", "--no-input"] })).toThrow(/interactive/)
+    expect(() => negotiate({ ...base, argv: ["--no-wizard"], stdinIsTTY: false })).toThrow(
+      /interactive/,
+    )
+  })
+
+  it("allows piped completion scripts but rejects explicit machine formats", () => {
+    expect(negotiate({ ...base, stdoutIsTTY: false, argv: ["--completions", "bash"] }).format).toBe(
+      "text",
+    )
+    expect(() => negotiate({ ...base, argv: ["--completions=bash", "--json"] })).toThrow(
+      /raw shell script/,
+    )
+    expect(() => negotiate({ ...base, argv: ["--completions", "bogus"] })).toThrow(/invalid value/)
+  })
+
+  it("leaves action-like positional values after the terminator alone", () => {
+    expect(
+      negotiate({ ...base, argv: ["--json", "--", "--wizard", "--completions"] }).argv,
+    ).toEqual(["--", "--wizard", "--completions"])
+  })
+})

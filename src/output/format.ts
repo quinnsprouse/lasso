@@ -1,3 +1,5 @@
+import { validateGlobalFlags } from "../contract/invocation.ts"
+
 /**
  * Format negotiation happens BEFORE command parsing so that even a parse
  * error can honor `--json`. This module is deliberately plain TypeScript:
@@ -123,6 +125,30 @@ export const negotiate = (options: NegotiateOptions): OutputMode => {
   if (error !== undefined) {
     throw new FormatNegotiationError(error, mode)
   }
+  const tokens = rest.slice(0, rest.includes("--") ? rest.indexOf("--") : rest.length)
+  const hasAction = (name: string, negated = false) =>
+    tokens.some((arg) =>
+      new RegExp(`^(${name}${negated ? `|--no-${name.slice(2)}` : ""})(=.*)?$`).test(arg),
+    )
+  const globalReason = validateGlobalFlags(tokens)
+  if (globalReason !== undefined)
+    throw new FormatNegotiationError(globalReason, mode, "run describe --json to list valid flags")
+  if (hasAction("--wizard", true) && (mode.format !== "text" || mode.noInput)) {
+    throw new FormatNegotiationError(
+      "--wizard is interactive and only available in text mode on a terminal",
+      mode,
+      "run without --wizard; use describe --json for machine-readable discovery",
+    )
+  }
+  if (hasAction("--completions")) {
+    if (mode.explicitFormat && mode.format !== "text")
+      throw new FormatNegotiationError(
+        "--completions emits a raw shell script, not envelopes",
+        mode,
+        "drop --json/--format (completions are normally piped to a file)",
+      )
+    return { ...mode, format: "text" }
+  }
   return mode
 }
 
@@ -131,9 +157,12 @@ export const negotiate = (options: NegotiateOptions): OutputMode => {
 export class FormatNegotiationError extends Error {
   readonly mode: OutputMode
 
-  constructor(message: string, mode: OutputMode) {
+  readonly fix: string
+
+  constructor(message: string, mode: OutputMode, fix = "use --format auto|json|text|ndjson") {
     super(message)
     this.name = "FormatNegotiationError"
     this.mode = mode
+    this.fix = fix
   }
 }

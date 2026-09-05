@@ -19,7 +19,7 @@ import {
  * Serializes the normalized command surfaces into the two introspection
  * documents: `describe` (inventory) and `schema` (standalone JSON Schema,
  * draft 2020-12, for params, outputs, and plans). Both derive from the same
- * CommandSurface the parser is built from, so they cannot drift.
+ * CommandSurface used to build the parser. Contract tests check the generated documents.
  */
 
 const DIALECT = "https://json-schema.org/draft/2020-12/schema"

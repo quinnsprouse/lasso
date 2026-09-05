@@ -1,3 +1,5 @@
+import { NodeServices } from "@effect/platform-node"
+import { Effect } from "effect"
 import { existsSync, readdirSync } from "node:fs"
 import { join } from "node:path"
 import { describe, expect, it } from "vitest"
@@ -5,7 +7,7 @@ import { contracts } from "../../src/commands/index.ts"
 import { surfaceOf } from "../../src/contract/surface.ts"
 import { GUIDE_TOPICS } from "../../src/guides/catalog.generated.ts"
 import { isGuideTopic } from "../../src/guides/catalog.ts"
-import { validateInvocation } from "../../src/contract/invocation.ts"
+import { validateInvocation } from "../../src/contract/adapter.ts"
 import { CLI_NAME } from "../../src/meta.ts"
 
 /**
@@ -44,18 +46,24 @@ describe("guide catalog", () => {
     }
   })
 
-  it("every fenced command line in every topic resolves to a real command with declared flags", () => {
-    for (const topic of topics) {
-      const fenced = [...topic.content.matchAll(/^```[a-z]*\n([\s\S]*?)^```/gm)].flatMap((match) =>
-        match[1]!.split("\n"),
-      )
-      const invocations = fenced.filter((line) => line.startsWith(`${CLI_NAME} `))
-      for (const line of invocations) {
-        expect(
-          validateInvocation(surfaces, argvOf(line)),
-          `${topic.topic}: ${line}`,
-        ).toBeUndefined()
-      }
-    }
+  it("every fenced command line in every topic resolves to a real command with declared flags", async () => {
+    await Promise.all(
+      topics.map(async (topic) => {
+        const fenced = [...topic.content.matchAll(/^```[a-z]*\n([\s\S]*?)^```/gm)].flatMap(
+          (match) => match[1]!.split("\n"),
+        )
+        const invocations = fenced.filter((line) => line.startsWith(`${CLI_NAME} `))
+        await Promise.all(
+          invocations.map(async (line) => {
+            expect(
+              await Effect.runPromise(
+                validateInvocation(surfaces, argvOf(line)).pipe(Effect.provide(NodeServices.layer)),
+              ),
+              `${topic.topic}: ${line}`,
+            ).toBeUndefined()
+          }),
+        )
+      }),
+    )
   })
 })

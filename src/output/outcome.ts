@@ -6,8 +6,7 @@ import type { NextAction } from "./guidance.ts"
  * The outcome algebra: every invocation ends in exactly one of these, and
  * `renderOutcome` is the only definition of what each looks like on the wire
  * in each format. Both the Renderer service (in-Effect) and the process
- * boundary (bin.ts) render through this module; the parser adapter's marked
- * `--version` line is the only stdout write that does not.
+ * boundary (bin.ts) render through this module, including machine-mode version output.
  *
  * Every outcome may carry point-of-use guidance (`next`, `guides`); the
  * wire always shows both, empty when absent.

@@ -13,7 +13,9 @@ npm run dev -- task list --json # run from source
 
 Node 22.19 or newer, npm 10 or newer. Disposable experiments go in `.scratch/` or the OS temp directory, never the repository root.
 
-What is demo and what is kit: `src/domain/`, `src/commands/task-*.ts`, `guides/topics/`, the router rows in `skills/lasso/SKILL.md`, and the `.lasso/` store are the demo; everything else is the kit. Replace the demo, keep the kit.
+Replace the demo in `src/domain/`, `src/commands/task-*.ts`, and `src/services/store.ts`. Update service wiring in `src/services/index.ts` and command registration in `src/commands/index.ts`. Replace the task-specific unit and command tests, `test/fixtures/mutations.ts`, the demo services in `test/contract/harness.ts`, and the task journeys in the e2e suite and `scripts/starter-contract.mjs`. The demo also includes `guides/topics/`, the router rows in `skills/lasso/SKILL.md`, and the `.lasso/` state directory.
+
+Keep the contract definitions, parser adapter, output protocol, and reusable checks. [Testing](docs/agents/TESTING.md) explains how to supply fixtures for replacement commands.
 
 ## Verification
 
@@ -27,10 +29,10 @@ Never skip, focus, or `.todo` a test to get green; Vitest lint rules fail the Fa
 
 ## Rules
 
-1. Commands are contracts (`defineQuery` / `defineMutation`), never raw parser code. Only `src/contract/adapter.ts` imports the parser. Direct `process` access is confined to `src/bin.ts` and the adapter's parser-output shim; lint enforces those per-file boundaries.
-2. Mutations are `plan` + `apply`. The runtime owns `--dry-run`, `--confirm`, and `--yes`. Plans are deterministic, JSON-round-trippable, self-contained, and read-only; `apply` receives only the confirmed plan and the write capabilities. The invariants plan every mutation twice, under different clocks, and compare.
+1. Commands are contracts (`defineQuery` / `defineMutation`), never raw parser code. Only `src/contract/adapter.ts` imports the parser. Direct `process` access is confined to `src/bin.ts` and the adapter's stderr console bridge; lint enforces those per-file boundaries.
+2. Mutations are `plan` + `apply`. The runtime owns `--dry-run`, `--confirm`, and `--yes`. Plans are deterministic, JSON-round-trippable, self-contained, and read-only; `apply` receives only the confirmed plan and the write capabilities. Every mutation supplies explicit input and read-service fixtures in `test/fixtures/mutations.ts`; the shared assertion compares plans under different clocks.
 3. Expected failures are built through `Errors.*` in `src/errors.ts`; those factories require an executable `fix`, and the runtime maps exit and transience from the catalog, never from the error instance.
-4. `renderOutcome` in `src/output/outcome.ts` is the single definition of the wire format. The Renderer emits it inside Effect, `src/bin.ts` writes at the process boundary, and the adapter's shim passes only the parser's `--version` line. In machine formats, diagnostics and stray Effect `Console` output go to stderr; `Console` is lint-banned in `src/` outside the process-boundary exceptions (`src/bin.ts`, the adapter shim).
+4. `renderOutcome` in `src/output/outcome.ts` is the single definition of the wire format. The Renderer emits command and machine-mode version output inside Effect; `src/bin.ts` writes settled failures at the process boundary. In machine formats, diagnostics and stray Effect `Console` output go to stderr; `Console` is lint-banned in `src/` outside the process-boundary exceptions (`src/bin.ts`, the adapter console bridge).
 5. Guidance is one vocabulary on every terminal outcome: `error.fix` (required), `next` (executable argv, validated against the surface, at most three), `guides` (topic ids). Guides live in `guides/topics/*.md`, inlined into the bundle by `node scripts/guides.mjs`; a topic exists only for knowledge the surface cannot express. See [docs/agents/GUIDANCE.md](docs/agents/GUIDANCE.md).
 6. Preserve compatibility for published commands and output. `test/contract/surface.snapshot.json` records `describe` and `schema`; `npm run check` fails on any unrecorded change. Review the snapshot diff for compatibility. Before the first release, replace the demo freely.
 
@@ -43,7 +45,7 @@ node scripts/new-command.mjs <group> <name>
 npm run check
 ```
 
-For a mutation, generate the skeleton, then replace `defineQuery` with `defineMutation`: add `planSchema`, `plan` (read services), `apply` (write services), and `idempotency`; add a unit test through fake layers (`test/unit/task-create.test.ts` is the pattern) and a happy-path plus a failure e2e case; then `npm run surface:update` (the generator recorded only the query).
+For a mutation, generate the skeleton, then replace `defineQuery` with `defineMutation`: add `planSchema`, `plan` (read services), `apply` (write services), and `idempotency`; add a unit test through fake layers (`test/unit/task-create.test.ts` is the pattern), explicit cases in `test/fixtures/mutations.ts`, and a happy-path plus a failure e2e case; then `npm run surface:update` (the generator recorded only the query).
 
 A new or edited guide topic: edit `guides/topics/<topic>.md`, run `node scripts/guides.mjs`, optionally declare it on a contract (`guides: [...]`), then record the surface change as below.
 

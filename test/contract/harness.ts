@@ -1,7 +1,7 @@
 import { Effect, FileSystem, Layer, Path, Schema, Sink, Stdio, Terminal } from "effect"
 import type { Exit } from "effect"
 import { ChildProcessSpawner } from "effect/unstable/process"
-import { buildRoot, machineOutputLayer, runRoot } from "../../src/contract/adapter.ts"
+import { machineOutputLayer, runCli } from "../../src/contract/adapter.ts"
 import type { AnyContract } from "../../src/contract/contract.ts"
 import { surfaceOf } from "../../src/contract/surface.ts"
 import type { Task } from "../../src/domain/task.ts"
@@ -12,6 +12,7 @@ import {
   StreamEvent,
 } from "../../src/output/envelope.ts"
 import type { OutputMode } from "../../src/output/format.ts"
+import { negotiate } from "../../src/output/format.ts"
 import { Progress } from "../../src/output/progress.ts"
 import { Renderer } from "../../src/output/renderer.ts"
 import { settleExit } from "../../src/runtime.ts"
@@ -44,14 +45,12 @@ export const makeInvoke =
     format: OutputMode["format"] = "json",
     tasks: ReadonlyArray<Task> = [],
   ): Promise<Invocation> => {
-    const mode: OutputMode = {
-      format,
-      noInput: true,
-      color: false,
+    const mode = negotiate({
       argv,
-      helpRequested: false,
-      explicitFormat: true,
-    }
+      stdoutIsTTY: false,
+      stdinIsTTY: false,
+      env: { LASSO_FORMAT: format },
+    })
     const out: Array<string> = []
     const err: Array<string> = []
 
@@ -88,26 +87,27 @@ export const makeInvoke =
       ),
     )
 
-    const root = buildRoot("lasso", "test cli", contracts)
     const rendererLayer = Renderer.layer(mode, "lasso")
-    // Machine formats get the same Console/formatter shim bin.ts installs.
-    const outputShim = format === "text" ? Layer.empty : machineOutputLayer(format)
     const layer = Layer.mergeAll(
       fakeServices,
       rendererLayer,
       Progress.layer.pipe(Layer.provideMerge(rendererLayer)),
-      outputShim,
+      ...(mode.format === "text" ? [] : [machineOutputLayer.pipe(Layer.provide(rendererLayer))]),
     ).pipe(Layer.provideMerge(environment))
     const exit: Exit.Exit<void, unknown> = await Effect.runPromiseExit(
-      runRoot(root, "0.0.0", argv).pipe(Effect.provide(layer)),
+      runCli({ binName: "lasso", summary: "test cli", version: "0.0.0", contracts }).pipe(
+        Effect.provide(layer),
+      ),
     )
-    const settled = settleExit({
-      exit,
-      mode,
-      binName: "lasso",
-      describeData: () => ({}),
-      surfaces: contracts.map(surfaceOf),
-    })
+    const settled = await Effect.runPromise(
+      settleExit({
+        exit,
+        mode,
+        binName: "lasso",
+        describeData: () => ({}),
+        surfaces: contracts.map(surfaceOf),
+      }).pipe(Effect.provide(environment)),
+    )
     for (const chunk of settled.writes) {
       ;(chunk.stream === "stdout" ? out : err).push(chunk.text)
     }

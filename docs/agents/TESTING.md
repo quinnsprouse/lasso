@@ -10,13 +10,19 @@ Handlers take services, so tests provide in-memory layers and run plan/apply as 
 
 ## Contract invariants (`test/contract/`) — mechanical protocol rejection
 
-- `invariants.test.ts` checks contract declarations, error codes, schema generation, and plan determinism.
+- `invariants.test.ts` checks contract declarations, error codes, schema generation, and mutation fixture coverage. `plan-fixture.ts` supplies the shared determinism assertion; `test/fixtures/mutations.ts` supplies demo inputs, expected plans or errors, and read-service layers.
 - `compatibility.test.ts` requires the recorded `describe` and `schema` definitions to match. Run `npm run surface:update` and review the diff for compatibility.
 - `runtime.test.ts` exercises the parser, mutation flow, rendering, and stdout purity through fake services. `commands.test.ts` exercises the demo commands.
-- `type-fixtures.ts` checks invalid parameters and service boundaries at compile time.
+- `type-fixtures.ts` checks invalid parameters and service boundaries at compile time. `test/unit/lint-boundaries.test.ts` probes the architecture lint rules with both allowed and forbidden code, including aliases.
 - `guides.test.ts` and `skill.test.ts` check references to real commands and topics. Writing style and length are authoring choices.
 - `test/unit/guide-generator.test.ts` verifies empty catalogs and standalone workflow topics.
 - `test/unit/guard.test.ts` checks direct-command refusals and the shell syntax the hook leaves alone.
+
+## Replacing mutation fixtures
+
+For each mutation, add `planFixture(command, { name, input, layer, expected })` to `test/fixtures/mutations.ts`. Supply a layer containing only the services its plan reads. Use `expected: { plan: ... }` for an encoded plan or `expected: { error: "code" }` for an expected failure. Include at least one successful case per registered mutation, and cover domain branches with explicit inputs and state.
+
+The shared `expectPlan` assertion runs each case twice with different clocks, compares the encoded plans, and checks a JSON round trip. It does not guess valid identifiers or enumerate flag combinations. Replace the fixtures when replacing the task demo; the assertion stays reusable.
 
 ## E2E (`test/e2e/`) — the shipped artifact, black-box
 

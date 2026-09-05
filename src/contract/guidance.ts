@@ -1,8 +1,8 @@
 import { isGuideTopic } from "../guides/catalog.ts"
 import type { Guidance, NextAction } from "../output/guidance.ts"
 import { NEXT_LIMIT } from "../output/guidance.ts"
-import { BOOLEAN_LITERALS, validateInvocation } from "./invocation.ts"
-import type { CommandSurface } from "./surface.ts"
+import { BOOLEAN_LITERALS } from "./invocation.ts"
+import { Effect } from "effect"
 
 /**
  * Validates and bounds point-of-use guidance before it reaches the wire.
@@ -16,22 +16,23 @@ import type { CommandSurface } from "./surface.ts"
  *   same way (contracts cannot produce one — the GuideTopic union stops them —
  *   but a hand-built AppError could).
  */
-export const finalizeGuidance = (
-  surfaces: ReadonlyArray<CommandSurface>,
+export const finalizeGuidance = Effect.fn("finalizeGuidance")(function* <R>(
+  validate: (args: ReadonlyArray<string>) => Effect.Effect<string | undefined, never, R>,
   input: {
     readonly next?: ReadonlyArray<NextAction> | undefined
     readonly guides?: ReadonlyArray<string> | undefined
   },
-): Guidance & { readonly warnings: ReadonlyArray<string> } => {
+): Effect.fn.Return<Guidance & { readonly warnings: ReadonlyArray<string> }, never, R> {
   const warnings: Array<string> = []
   const next: Array<NextAction> = []
   const seen = new Set<string>()
   for (const action of input.next ?? []) {
+    // oxlint-disable-next-line effecttsgo/prefer-schema-over-json -- argv serialization is a deduplication key
     const key = JSON.stringify(action.args)
     if (seen.has(key)) {
       continue
     }
-    const reason = validateInvocation(surfaces, action.args)
+    const reason = yield* validate(action.args)
     if (reason !== undefined) {
       warnings.push(`dropped next action "${action.message}": ${reason}`)
       continue
@@ -55,7 +56,7 @@ export const finalizeGuidance = (
     guides.push(topic)
   }
   return { next, guides, warnings }
-}
+})
 
 /** The machine-format flag a replay must carry so it stays machine-readable under a TTY. */
 export const formatArgs = (format: "json" | "ndjson" | "text"): ReadonlyArray<string> =>
