@@ -1,3 +1,4 @@
+import { NodeServices } from "@effect/platform-node"
 import { Effect } from "effect"
 import type { Exit } from "effect"
 import { describe, expect, it } from "vitest"
@@ -24,13 +25,15 @@ const exitOf = (effect: Effect.Effect<void, unknown>): Promise<Exit.Exit<void, u
   Effect.runPromiseExit(effect)
 
 const settle = async (effect: Effect.Effect<void, unknown>, format: OutputMode["format"]) =>
-  settleExit({
-    exit: await exitOf(effect),
-    mode: mode(format),
-    binName: "lasso",
-    describeData: () => ({ marker: true }),
-    surfaces: [],
-  })
+  Effect.runPromise(
+    settleExit({
+      exit: await exitOf(effect),
+      mode: mode(format),
+      binName: "lasso",
+      describeData: () => ({ marker: true }),
+      surfaces: [],
+    }).pipe(Effect.provide(NodeServices.layer)),
+  )
 
 describe("settleExit", () => {
   it("success writes nothing and exits 0", async () => {
@@ -121,13 +124,15 @@ describe("an interrupted command", () => {
     const { contracts } = await import("../../src/commands/index.ts")
     const { surfaceOf } = await import("../../src/contract/surface.ts")
     const exit = await Effect.runPromiseExit(Effect.interrupt)
-    const settled = settleExit({
-      exit,
-      mode: { ...mode("json"), argv: ["task", "create", "x", "--yes"] },
-      binName: "lasso",
-      describeData: () => ({}),
-      surfaces: contracts.map(surfaceOf),
-    })
+    const settled = await Effect.runPromise(
+      settleExit({
+        exit,
+        mode: { ...mode("json"), argv: ["task", "create", "x", "--yes"] },
+        binName: "lasso",
+        describeData: () => ({}),
+        surfaces: contracts.map(surfaceOf),
+      }).pipe(Effect.provide(NodeServices.layer)),
+    )
     const envelope = JSON.parse(settled.writes.at(-1)!.text)
     expect(envelope.guides).toEqual(["task-ids", "mutation-replay"])
     expect(envelope.next).toEqual([

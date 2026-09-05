@@ -1,7 +1,14 @@
 import { Console as NodeConsole } from "node:console"
-import { randomUUID } from "node:crypto"
 import { Console, Effect, Layer, Schema } from "effect"
-import { Argument, CliError, CliOutput, Command, Flag } from "effect/unstable/cli"
+import {
+  Argument,
+  CliConfig,
+  CliError,
+  CliOutput,
+  Command,
+  Flag,
+  GlobalFlag,
+} from "effect/unstable/cli"
 import type { AppError } from "../errors.ts"
 import { Errors } from "../errors.ts"
 import { Renderer } from "../output/renderer.ts"
@@ -19,6 +26,9 @@ import { surfaceOf } from "./surface.ts"
 import { planToken } from "./token.ts"
 import { finalizeGuidance, formatArgs, withMachineFormat, withoutFlag } from "./guidance.ts"
 import { AppError as AppErrorClass } from "../errors.ts"
+import { negotiate } from "../output/format.ts"
+import type { OutputMode } from "../output/format.ts"
+import { describeCli } from "./jsonschema.ts"
 import type { GuideTopic } from "../guides/catalog.generated.ts"
 
 // The only parser import boundary; commands are built from the normalized contracts.
@@ -28,7 +38,7 @@ export class ExitSignal extends Schema.TaggedError<ExitSignal>()("ExitSignal", {
   code: Schema.Int,
 }) {}
 
-type Handled = Effect.Effect<void, AppError | ExitSignal, AppServices | Renderer>
+type Handled = Effect.Effect<void, AppError | ExitSignal, AppServices | Renderer | ParserServices>
 
 /** The next move after any usage error: discover the real surface. */
 const DISCOVER = [{ message: "list every command and flag", args: ["describe", "--json"] }]
@@ -39,6 +49,29 @@ interface Controls {
   readonly confirm: string | undefined
   readonly yes: boolean
   readonly fields: string | undefined
+}
+
+const validateControls = (controls: Controls): Effect.Effect<void, AppError> => {
+  if (controls.dryRun && (controls.yes || controls.confirm !== undefined)) {
+    return Effect.fail(
+      Errors.invalidUsage({
+        message: "--dry-run cannot be combined with --yes or --confirm",
+        fix: "preview with --dry-run alone, then apply with --yes or --confirm",
+        next: DISCOVER,
+      }),
+    )
+  }
+  if (controls.yes && controls.confirm !== undefined) {
+    return Effect.fail(
+      Errors.invalidUsage({
+        message: "--yes and --confirm are mutually exclusive",
+        fix: "use --confirm <token> to apply a previewed plan, or --yes to skip the preview",
+        next: DISCOVER,
+      }),
+    )
+  }
+
+  return Effect.void
 }
 
 const splitInput = (
@@ -114,11 +147,15 @@ const argumentFor = (param: SurfaceParam): Argument.Argument<unknown> => {
   }
 }
 
-const paramsFor = (surface: CommandSurface): Record<string, unknown> =>
+const paramsFor = (surface: CommandSurface, help = false): Record<string, unknown> =>
   Object.fromEntries(
     surface.params.map((param) => [
       param.key,
-      param.kind === "argument" ? argumentFor(param) : flagFor(param),
+      param.kind === "argument"
+        ? help
+          ? argumentFor(param).pipe(Argument.optional)
+          : argumentFor(param)
+        : flagFor(param),
     ]),
   )
 
@@ -193,7 +230,7 @@ const runQuery = Effect.fn("runQuery")(function* (
   surface: CommandSurface,
   all: ReadonlyArray<CommandSurface>,
   raw: Record<string, unknown>,
-): Effect.fn.Return<void, AppError | ExitSignal, AppServices | Renderer> {
+): Effect.fn.Return<void, AppError | ExitSignal, AppServices | Renderer | ParserServices> {
   const contract = surface.contract as QueryContract<
     Record<string, ParamSpec>,
     unknown,
@@ -215,7 +252,7 @@ const runQuery = Effect.fn("runQuery")(function* (
     .pipe(Effect.mapError(withCommandGuides(surface)))
   const encoded = yield* encodeOutput(contract, data)
   // Success offers next moves; guides are reserved for decisions and failures.
-  const guidance = finalizeGuidance(all, {
+  const guidance = yield* finalizeGuidance((args) => validateInvocation(all, args), {
     next: contract.next?.({ input: domain as InputOf<Record<string, ParamSpec>>, data }),
   })
   const rows = contract.collection?.items(encoded)
@@ -258,7 +295,7 @@ const runMutation = Effect.fn("runMutation")(function* (
   surface: CommandSurface,
   all: ReadonlyArray<CommandSurface>,
   raw: Record<string, unknown>,
-): Effect.fn.Return<void, AppError | ExitSignal, AppServices | Renderer> {
+): Effect.fn.Return<void, AppError | ExitSignal, AppServices | Renderer | ParserServices> {
   const contract = surface.contract as MutationContract<
     Record<string, ParamSpec>,
     unknown,
@@ -269,21 +306,7 @@ const runMutation = Effect.fn("runMutation")(function* (
   const renderer = yield* Renderer
   const { domain, controls } = splitInput(surface, raw)
 
-  // Contradictory control combinations fail before planning.
-  if (controls.dryRun && (controls.yes || controls.confirm !== undefined)) {
-    return yield* Errors.invalidUsage({
-      message: "--dry-run cannot be combined with --yes or --confirm",
-      fix: "preview with --dry-run alone, then apply with --yes or --confirm",
-      next: DISCOVER,
-    })
-  }
-  if (controls.yes && controls.confirm !== undefined) {
-    return yield* Errors.invalidUsage({
-      message: "--yes and --confirm are mutually exclusive",
-      fix: "use --confirm <token> to apply a previewed plan, or --yes to skip the preview",
-      next: DISCOVER,
-    })
-  }
+  yield* validateControls(controls)
 
   const original = renderer.mode.argv
   const machine = formatArgs(renderer.mode.format)
@@ -335,7 +358,7 @@ const runMutation = Effect.fn("runMutation")(function* (
 
   if (controls.dryRun) {
     // Preview-first: the next move is the confirmation flow, never a generated --yes.
-    const guidance = finalizeGuidance(all, {
+    const guidance = yield* finalizeGuidance((args) => validateInvocation(all, args), {
       next: [
         {
           message: "re-run without --dry-run to get a confirmation token",
@@ -376,7 +399,7 @@ const runMutation = Effect.fn("runMutation")(function* (
       token,
       ...(machine.length > 0 ? machine : ["--json"]),
     ])
-    const guidance = finalizeGuidance(all, {
+    const guidance = yield* finalizeGuidance((args) => validateInvocation(all, args), {
       next: [{ message: "apply exactly this plan", args: confirmArgs }],
       guides: surface.guides,
     })
@@ -395,7 +418,7 @@ const runMutation = Effect.fn("runMutation")(function* (
 
   const data = yield* contract.apply(plan).pipe(Effect.mapError(withCommandGuides(surface)))
   const encoded = yield* encodeOutput(contract, data)
-  const guidance = finalizeGuidance(all, {
+  const guidance = yield* finalizeGuidance((args) => validateInvocation(all, args), {
     next: contract.next?.({ input: domain as InputOf<Record<string, ParamSpec>>, data }),
   })
   yield* renderer
@@ -408,119 +431,186 @@ const runMutation = Effect.fn("runMutation")(function* (
     .pipe(Effect.orDie)
 })
 
-const toCommand = (surface: CommandSurface, all: ReadonlyArray<CommandSurface>) => {
-  const handler = (raw: Record<string, unknown>): Handled =>
-    surface.contract.kind === "mutation"
-      ? runMutation(surface, all, raw)
-      : runQuery(surface, all, raw)
+export type ParserServices = Command.Environment
 
-  const leaf = surface.path[surface.path.length - 1]!
-  return Command.make(leaf, paramsFor(surface) as never, handler as never).pipe(
-    Command.withDescription(surface.contract.summary),
-    Command.withExamples(surface.contract.examples.map((example) => ({ ...example }))),
-  )
-}
+type LeafHandler<E, R> = (
+  surface: CommandSurface,
+  raw: Record<string, unknown>,
+) => Effect.Effect<void, E, R>
 
-/**
- * Builds the root command from the contract roster: `task list` and
- * `task create` become subcommands of an auto-created `task` group.
- */
-export const buildRoot = (
+const commandTree = <E, R>(
   binName: string,
   summary: string,
-  contracts: ReadonlyArray<AnyContract>,
+  surfaces: ReadonlyArray<CommandSurface>,
+  handler: LeafHandler<E, R>,
+  help = false,
 ) => {
-  const surfaces = contracts.map(surfaceOf)
+  const leaf = (surface: CommandSurface) =>
+    Command.make(
+      surface.path.at(-1)!,
+      paramsFor(surface, help) as never,
+      ((raw: Record<string, unknown>) => handler(surface, raw)) as never,
+    ).pipe(
+      Command.withDescription(surface.contract.summary),
+      Command.withExamples(surface.contract.examples.map((example) => ({ ...example }))),
+    )
   const groups = new Map<string, Array<CommandSurface>>()
   const topLevel: Array<CommandSurface> = []
   for (const surface of surfaces) {
-    if (surface.path.length === 1) {
-      topLevel.push(surface)
-    } else if (surface.path.length === 2) {
+    if (surface.path.length === 1) topLevel.push(surface)
+    else if (surface.path.length === 2) {
       const group = groups.get(surface.path[0]!) ?? []
       group.push(surface)
       groups.set(surface.path[0]!, group)
-    } else {
+    } else
       throw new Error(`command paths deeper than two levels are not supported: "${surface.name}"`)
-    }
   }
-
-  const subcommands = [
-    ...[...groups.entries()].map(([group, members]) =>
-      Command.make(group).pipe(
-        Command.withDescription(`${group} commands`),
-        Command.withSubcommands(members.map((member) => toCommand(member, surfaces)) as never),
-      ),
-    ),
-    ...topLevel.map((surface) => toCommand(surface, surfaces)),
-  ]
-
   return Command.make(binName).pipe(
     Command.withDescription(summary),
-    Command.withSubcommands(subcommands as never),
-  )
+    Command.withSubcommands([
+      ...[...groups].map(([name, members]) =>
+        Command.make(name).pipe(
+          Command.withDescription(`${name} commands`),
+          Command.withSubcommands(members.map(leaf) as never),
+        ),
+      ),
+      ...topLevel.map(leaf),
+    ] as never),
+  ) as Command.Command<string, {}, {}, E, R>
 }
 
-/** Runs the root command against argv. The only Command.runWith call site. */
-export const runRoot = (
-  root: ReturnType<typeof buildRoot>,
-  version: string,
-  argv: ReadonlyArray<string>,
-) => Command.runWith(root, { version })(argv)
+// The validation tree uses the real parser with inert handlers and action flags.
+// It cannot run a query, plan, apply, wizard, or completion generator.
+export const inspectInvocation = Effect.fn("inspectInvocation")(function* (
+  surfaces: ReadonlyArray<CommandSurface>,
+  mode: OutputMode,
+) {
+  let command: CommandSurface | undefined
+  const root = commandTree(
+    "cli",
+    "",
+    surfaces,
+    (surface, raw) =>
+      Effect.andThen(
+        surface.contract.kind === "mutation" && !mode.helpRequested
+          ? validateControls(splitInput(surface, raw).controls)
+          : Effect.void,
+        Effect.sync(() => {
+          command = surface
+        }),
+      ),
+    mode.helpRequested,
+  )
+  const builtIns = GlobalFlag.BuiltIns.map((flag) =>
+    flag._tag === "Action" ? { ...flag, run: () => Effect.void } : flag,
+  )
+  const console: Console.Console = Object.assign(Object.create(yield* Console.Console), {
+    log: () => {},
+    error: () => {},
+  })
+  const result = yield* Command.runWith(root, { version: "" })(mode.argv).pipe(
+    Effect.provideService(CliConfig.CliConfig, CliConfig.make({ builtIns })),
+    Effect.provideService(Console.Console, console),
+    Effect.result,
+  )
+  if (result._tag === "Success") return { command, reason: undefined }
+  const error = result.failure
+  if (Schema.is(AppErrorClass)(error)) return { command, reason: error.message }
+  const failure = classifyParserError(error, "cli")
+  return { command, reason: failure?.kind === "usage" ? failure.failure.message : undefined }
+})
+
+export const validateInvocation = Effect.fn("validateInvocation")(function* (
+  surfaces: ReadonlyArray<CommandSurface>,
+  args: ReadonlyArray<string>,
+) {
+  const negotiated = yield* Effect.try({
+    try: () => negotiate({ argv: args, stdoutIsTTY: false, stdinIsTTY: false, env: {} }),
+    catch: (error) =>
+      Errors.invalidUsage({
+        message: error instanceof Error ? error.message : String(error),
+        fix: "check the invocation flags",
+      }),
+  }).pipe(Effect.result)
+  if (negotiated._tag === "Failure") {
+    return negotiated.failure.message
+  }
+  return (yield* inspectInvocation(surfaces, negotiated.success)).reason
+})
+
+export const runCli = Effect.fn("runCli")(function* (options: {
+  readonly binName: string
+  readonly summary: string
+  readonly version: string
+  readonly contracts: ReadonlyArray<AnyContract>
+}) {
+  const renderer = yield* Renderer
+  const mode = renderer.mode
+  const surfaces = options.contracts.map(surfaceOf)
+  if (mode.helpRequested && mode.format !== "text") {
+    const { reason } = yield* inspectInvocation(surfaces, mode)
+    if (reason !== undefined)
+      return yield* Errors.invalidUsage({
+        message: reason,
+        fix: `run ${options.binName} describe --json to list valid flags`,
+        next: DISCOVER,
+      })
+    return yield* renderer.emit({ kind: "ok", data: describeCli(options) }).pipe(Effect.orDie)
+  }
+  const root = commandTree(
+    options.binName,
+    options.summary,
+    surfaces,
+    (surface, raw): Handled =>
+      surface.contract.kind === "mutation"
+        ? runMutation(surface, surfaces, raw)
+        : runQuery(surface, surfaces, raw),
+  )
+  const argv = mode.helpRequested ? withMachineFormat(mode.argv, ["--help"]) : mode.argv
+  return yield* Command.runWith(root, { version: options.version })(argv)
+})
 
 /**
  * In machine formats, help text must never reach stdout: the formatter is
- * silenced (bin answers help with describe data) and whitespace-only console
+ * silenced (runCli answers help with describe data) and whitespace-only console
  * writes from the parser runtime are dropped.
  */
 const machineFormatterBase = CliOutput.defaultFormatter({ colors: false })
 
-// Mark the parser's version line so only that Console write can reach stdout.
-// All other Console methods go to stderr; blank parser chatter is dropped.
-const VERSION_MARK = `\u0000${randomUUID()}\u0000`
-
 const stderrConsole = new NodeConsole({ stdout: process.stderr, stderr: process.stderr })
-
 const quietConsole: Console.Console = Object.assign(Object.create(stderrConsole), {
   log: (...args: ReadonlyArray<unknown>) => {
-    if (args.every((arg) => typeof arg === "string" && arg.trim() === "")) {
-      return
-    }
-    if (args.length === 1 && typeof args[0] === "string" && args[0].startsWith(VERSION_MARK)) {
-      process.stdout.write(`${args[0].slice(VERSION_MARK.length)}\n`)
-      return
-    }
-    stderrConsole.log(...args)
+    if (!args.every((arg) => typeof arg === "string" && arg.trim() === ""))
+      stderrConsole.log(...args)
   },
 })
 
-export const machineOutputLayer = (format: "json" | "ndjson"): Layer.Layer<never> => {
-  const formatter: CliOutput.Formatter = {
-    formatCliError: (error) => machineFormatterBase.formatCliError(error),
-    formatError: (error) => machineFormatterBase.formatError(error),
-    formatErrors: (errors) => machineFormatterBase.formatErrors(errors),
-    formatHelpDoc: () => "",
-    // --version follows the outcome protocol of the negotiated format.
-    formatVersion: (name, cliVersion) =>
-      VERSION_MARK +
-      (format === "ndjson"
-        ? JSON.stringify({
-            event: "summary",
-            data: { name, version: cliVersion },
-            next: [],
-            guides: [],
-          })
-        : JSON.stringify({
-            schemaVersion: SCHEMA_VERSION,
-            status: "ok",
-            data: { name, version: cliVersion },
-            warnings: [],
-            next: [],
-            guides: [],
-          })),
-  }
-  return Layer.mergeAll(CliOutput.layer(formatter), Layer.succeed(Console.Console, quietConsole))
-}
+export const machineOutputLayer = Layer.mergeAll(
+  CliOutput.layer(Object.assign(Object.create(machineFormatterBase), { formatHelpDoc: () => "" })),
+  Layer.succeed(Console.Console, quietConsole),
+  Layer.effect(
+    CliConfig.CliConfig,
+    Effect.gen(function* () {
+      const renderer = yield* Renderer
+      return CliConfig.make({
+        builtIns: GlobalFlag.BuiltIns.map((flag) =>
+          flag === GlobalFlag.Version
+            ? GlobalFlag.action({
+                flag: GlobalFlag.Version.flag,
+                run: (_value: boolean, { command, version }: GlobalFlag.HandlerContext) =>
+                  renderer
+                    .emit({
+                      kind: "ok",
+                      data: { name: command.name, version },
+                    })
+                    .pipe(Effect.orDie),
+              })
+            : flag,
+        ),
+      })
+    }),
+  ),
+)
 
 /** Kit-owned classification of a failed run — bin.ts never sees parser types. */
 export type RunFailure =
@@ -570,7 +660,7 @@ const usageErrorFrom = (error: CliError.CliError, binName: string): AppErrorLike
     }
     case "UnknownSubcommand":
       return {
-        message: `unknown command "${error.subcommand}"`,
+        message: `unknown command "${[...(error.parent?.slice(1) ?? []), error.subcommand].join(" ")}"`,
         fix: `run ${binName} describe --json to list commands`,
       }
     case "UserError":

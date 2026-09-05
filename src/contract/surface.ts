@@ -7,8 +7,7 @@ import { ERROR_CATALOG } from "../errors.ts"
 /**
  * The normalized command surface: contract params PLUS the framework-owned
  * params the runtime adds, with their real CLI spellings. The parser adapter,
- * `describe`, and `schema` all consume exactly this object, so they cannot
- * disagree about what a command accepts or returns.
+ * `describe`, and `schema` consume this definition. Tests compare their behavior.
  */
 
 export const kebabCase = (name: string): string =>

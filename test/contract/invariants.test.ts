@@ -1,6 +1,6 @@
+import { mutationFixtures } from "../fixtures/mutations.ts"
 import { readFileSync } from "node:fs"
 import { join } from "node:path"
-import { Clock, Effect, Layer, Schema } from "effect"
 import { describe, expect, it } from "vitest"
 import { contracts } from "../../src/commands/index.ts"
 import type { ParamSpec } from "../../src/contract/contract.ts"
@@ -12,14 +12,10 @@ import {
   kebabCase,
   surfaceOf,
 } from "../../src/contract/surface.ts"
-import type { SurfaceParam } from "../../src/contract/surface.ts"
-import { canonicalJson, planToken } from "../../src/contract/token.ts"
-import { Task } from "../../src/domain/task.ts"
+import { planToken } from "../../src/contract/token.ts"
 import { AppError, ERROR_CATALOG, Errors, factoryName } from "../../src/errors.ts"
 import { CLI_NAME, CLI_VERSION } from "../../src/meta.ts"
 import { ExitCode } from "../../src/output/exit.ts"
-import { Progress } from "../../src/output/progress.ts"
-import { StoreReader } from "../../src/services/store.ts"
 
 /**
  * Contract invariants: the mechanical rejections. These run in the Fast
@@ -34,9 +30,9 @@ const RESERVED_ALIASES = new Set([...GLOBAL_FLAG_ALIASES, ...FRAMEWORK_ALIASES])
 const surfaces = contracts.map(surfaceOf)
 
 describe("roster", () => {
-  it("has the demo and introspection commands", () => {
+  it("has the introspection commands", () => {
     const names = contracts.map((contract) => contract.name)
-    for (const expected of ["task list", "task create", "describe", "schema"]) {
+    for (const expected of ["describe", "schema"]) {
       expect(names).toContain(expected)
     }
   })
@@ -287,122 +283,18 @@ describe("exit registry", () => {
   })
 })
 
-/**
- * Plans must be deterministic for identical state and input: replaying
- * confirmArgs recomputes the plan and compares tokens, so a plan that
- * embeds a timestamp, a random id, or iteration order would never confirm.
- * Every mutation in the roster is planned twice against the same fake state
- * with a sample input derived from its own params, and both runs must agree.
- */
-const sampleValue = (param: SurfaceParam): unknown => {
-  switch (param.type) {
-    case "boolean":
-      return false
-    case "integer":
-      return param.default ?? 1
-    case "choice":
-      return param.default ?? param.choices?.[0]
-    default:
-      return param.default ?? "sample"
-  }
-}
-
-/**
- * One input per combination of boolean flags and choice values, so every
- * plan variant a flag or choice selects is exercised.
- */
-const sampleInputs = (
-  params: ReadonlyArray<SurfaceParam>,
-): ReadonlyArray<Record<string, unknown>> => {
-  const own = params.filter((param) => param.owner === "contract")
-  const base = Object.fromEntries(own.map((param) => [param.key, sampleValue(param)]))
-  let inputs: Array<Record<string, unknown>> = [base]
-  for (const param of own) {
-    if (param.type === "boolean") {
-      inputs = inputs.flatMap((input) => [input, { ...input, [param.key]: true }])
-    } else if (param.type === "choice") {
-      inputs = inputs.flatMap((input) =>
-        (param.choices ?? []).map((choice) => Object.assign({}, input, { [param.key]: choice })),
-      )
-    }
-  }
-  return inputs
-}
-
-/** The live Clock with its "now" pinned: two runs a year apart, so any clock leak into a plan shows as drift. */
-const liveClock = Effect.runSync(Clock.clockWith(Effect.succeed))
-const clockAt = (millis: number): Clock.Clock => ({
-  monotonicTimeNanosUnsafe: () => liveClock.monotonicTimeNanosUnsafe(),
-  monotonicTimeNanos: liveClock.monotonicTimeNanos,
-  sleep: (duration) => liveClock.sleep(duration),
-  currentTimeMillisUnsafe: () => millis,
-  currentTimeMillis: Effect.succeed(millis),
-  currentTimeNanosUnsafe: () => BigInt(millis) * 1_000_000n,
-  currentTimeNanos: Effect.succeed(BigInt(millis) * 1_000_000n),
-})
-
-const readLayers = (tasks: ReadonlyArray<Task>) =>
-  Layer.mergeAll(
-    Layer.succeed(StoreReader, StoreReader.of({ load: Effect.succeed(tasks) })),
-    Layer.succeed(Progress, Progress.of({ report: () => Effect.void })),
-  )
-
-const STATES: ReadonlyArray<[string, ReadonlyArray<Task>]> = [
-  ["an empty store", []],
-  [
-    "a store that already holds the sample",
-    [
-      new Task({
-        id: "task_sample",
-        title: "sample",
-        status: "open",
-        createdAt: "2026-01-01T00:00:00.000Z",
-      }),
-    ],
-  ],
-]
-
-describe.each(
-  contracts.flatMap((contract) =>
-    contract.kind === "mutation" ? ([[contract.name, contract]] as const) : [],
-  ),
-)("mutation %s plans deterministically", (_name, contract) => {
-  const surface = surfaceOf(contract)
-  const inputs = sampleInputs(surface.params)
-  const cases = STATES.flatMap(([state, tasks]) =>
-    inputs.map((input, index) => [`${state}, input #${index}`, tasks, input] as const),
-  )
-  const successes: Array<string> = []
-
-  // Each run sees a different pinned Clock (a year apart), so a plan that
-  // embeds the current time differs deterministically instead of by luck.
-  // (Date is lint-banned in src; Clock goes through the service.)
-  const runOnce = (tasks: ReadonlyArray<Task>, input: Record<string, unknown>, at: number) =>
-    Effect.runPromiseExit(
-      (contract.plan(input as never) as Effect.Effect<unknown, AppError>).pipe(
-        Effect.provide(readLayers(tasks)),
-        Effect.provideService(Clock.Clock, clockAt(at)),
+describe("mutation plan fixtures", () => {
+  it("covers every registered mutation with a successful case", () => {
+    const mutations = contracts.filter((contract) => contract.kind === "mutation")
+    expect(
+      new Set(
+        mutationFixtures.filter((fixture) => fixture.succeeds).map((fixture) => fixture.contract),
       ),
-    )
-
-  it.each(cases)("against %s", async (label, tasks, input) => {
-    const first = await runOnce(tasks, input, 1_700_000_000_000)
-    const second = await runOnce(tasks, input, 1_731_536_000_000)
-    expect(first._tag).toBe(second._tag)
-    if (first._tag === "Success" && second._tag === "Success") {
-      const encode = Schema.encodeUnknownSync(contract.planSchema)
-      expect(canonicalJson(encode(first.value))).toBe(canonicalJson(encode(second.value)))
-      successes.push(label)
-    } else {
-      // Expected failures must be AppErrors (not defects) and identical.
-      expect(String(first)).toBe(String(second))
-      expect(String(first)).toContain("AppError")
-    }
+    ).toEqual(new Set(mutations))
+    for (const fixture of mutationFixtures) expect(mutations).toContain(fixture.contract)
   })
 
-  it("has at least one state/input combination that plans successfully", () => {
-    expect(successes.length, "no sample input produced a plan; extend sampleValue").toBeGreaterThan(
-      0,
-    )
+  it.each(mutationFixtures)("$contract.name: $name", async (fixture) => {
+    await fixture.expectPlan()
   })
 })

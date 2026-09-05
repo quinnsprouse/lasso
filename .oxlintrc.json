@@ -22,64 +22,62 @@
     "no-restricted-properties": [
       "error",
       {
-        "object": "Effect",
         "property": "runPromise",
         "message": "Run effects only in src/bin.ts; compose them elsewhere."
       },
       {
-        "object": "Effect",
         "property": "runPromiseExit",
         "message": "Run effects only in src/bin.ts; compose them elsewhere."
       },
       {
-        "object": "Effect",
         "property": "runSync",
         "message": "Run effects only in src/bin.ts; compose them elsewhere."
       },
       {
-        "object": "Effect",
         "property": "runSyncExit",
         "message": "Run effects only in src/bin.ts; compose them elsewhere."
       },
       {
-        "object": "Effect",
         "property": "runFork",
         "message": "Run effects only in src/bin.ts; compose them elsewhere."
       },
       {
-        "object": "Effect",
         "property": "runCallback",
         "message": "Run effects only in src/bin.ts; compose them elsewhere."
       },
       {
-        "object": "Effect",
         "property": "runPromiseWith",
         "message": "Run effects only in src/bin.ts; compose them elsewhere."
       },
       {
-        "object": "Effect",
         "property": "runPromiseExitWith",
         "message": "Run effects only in src/bin.ts; compose them elsewhere."
       },
       {
-        "object": "Effect",
         "property": "runSyncWith",
         "message": "Run effects only in src/bin.ts; compose them elsewhere."
       },
       {
-        "object": "Effect",
         "property": "runSyncExitWith",
         "message": "Run effects only in src/bin.ts; compose them elsewhere."
       },
       {
-        "object": "Effect",
         "property": "runForkWith",
         "message": "Run effects only in src/bin.ts; compose them elsewhere."
       },
       {
-        "object": "Effect",
         "property": "runCallbackWith",
         "message": "Run effects only in src/bin.ts; compose them elsewhere."
+      },
+      {
+        "object": "globalThis",
+        "property": "process",
+        "message": "Only src/bin.ts and the adapter console bridge may access the process."
+      },
+      {
+        "object": "global",
+        "property": "process",
+        "message": "Only src/bin.ts and the adapter console bridge may access the process."
       }
     ],
     "typescript/consistent-return": "off",
@@ -117,7 +115,7 @@
           },
           {
             "name": "node:process",
-            "message": "Only src/bin.ts (and the adapter's output shim) touch the process; commands get services."
+            "message": "Only src/bin.ts (and the adapter's stderr console bridge) touch the process; commands get services."
           },
           {
             "name": "effect/unstable/cli",
@@ -135,7 +133,13 @@
       "error",
       {
         "name": "process",
-        "message": "Only src/bin.ts (and the adapter's output shim) touch the process; commands get services."
+        "message": "Only src/bin.ts (and the adapter's stderr console bridge) touch the process; commands get services."
+      }
+    ],
+    "vitest/expect-expect": [
+      "error",
+      {
+        "assertFunctionNames": ["expect", "*.expectPlan"]
       }
     ]
   },
@@ -189,7 +193,7 @@
               },
               {
                 "name": "node:process",
-                "message": "Only src/bin.ts (and the adapter's output shim) touch the process."
+                "message": "Only src/bin.ts (and the adapter's stderr console bridge) touch the process."
               }
             ]
           }
@@ -232,8 +236,14 @@
       "rules": {
         "no-restricted-properties": [
           "error",
-          { "property": "skipIf", "message": "Tests must run in every supported environment." },
-          { "property": "runIf", "message": "Tests must run in every supported environment." }
+          {
+            "property": "skipIf",
+            "message": "Tests must run in every supported environment."
+          },
+          {
+            "property": "runIf",
+            "message": "Tests must run in every supported environment."
+          }
         ]
       }
     }

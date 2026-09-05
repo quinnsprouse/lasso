@@ -1,6 +1,11 @@
-import { Cause, Exit, Schema } from "effect"
-import type { RunFailure } from "./contract/adapter.ts"
-import { classifyParserError, ExitSignal } from "./contract/adapter.ts"
+import { Cause, Effect, Exit, Schema } from "effect"
+import type { ParserServices, RunFailure } from "./contract/adapter.ts"
+import {
+  classifyParserError,
+  ExitSignal,
+  inspectInvocation,
+  validateInvocation,
+} from "./contract/adapter.ts"
 import { AppError, ERROR_CATALOG } from "./errors.ts"
 import {
   finalizeGuidance,
@@ -8,7 +13,6 @@ import {
   withMachineFormat,
   withoutFlag,
 } from "./contract/guidance.ts"
-import { resolveCommandPath } from "./contract/invocation.ts"
 import type { CommandSurface } from "./contract/surface.ts"
 import { ExitCode } from "./output/exit.ts"
 import type { OutputMode } from "./output/format.ts"
@@ -16,7 +20,7 @@ import type { Outcome, Write } from "./output/outcome.ts"
 import { renderOutcome } from "./output/outcome.ts"
 
 /**
- * Pure settlement of a finished run: maps the Exit to the writes that still
+ * Settlement of a finished run: maps the Exit to the writes that still
  * need to happen and the process exit code. `bin.ts` feeds this to the real
  * process; the runtime tests feed it captured exits — same logic, one place.
  */
@@ -25,7 +29,7 @@ export interface Settled {
   readonly code: number
 }
 
-export const settleExit = (options: {
+export const settleExit = Effect.fn("settleExit")(function* (options: {
   readonly exit: Exit.Exit<void, unknown>
   readonly mode: OutputMode
   readonly binName: string
@@ -33,10 +37,10 @@ export const settleExit = (options: {
   readonly describeData: () => unknown
   /** The command surfaces, so next actions on settled failures are validated like any other. */
   readonly surfaces: ReadonlyArray<CommandSurface>
-}): Settled => {
+}): Effect.fn.Return<Settled, never, ParserServices> {
   const { exit, mode, binName, surfaces } = options
   const render = (outcome: Outcome): ReadonlyArray<Write> => renderOutcome(mode, binName, outcome)
-  const guided = (
+  const guided = Effect.fn("settleExit.guided")(function* (
     outcome: Outcome,
     input: {
       readonly next?:
@@ -44,35 +48,31 @@ export const settleExit = (options: {
         | undefined
       readonly guides?: ReadonlyArray<string> | undefined
     },
-  ): Outcome => {
-    const guidance = finalizeGuidance(surfaces, input)
+  ) {
+    const guidance = yield* finalizeGuidance((args) => validateInvocation(surfaces, args), input)
     return {
       ...outcome,
       next: guidance.next,
       guides: guidance.guides,
       warnings: [...(outcome.warnings ?? []), ...guidance.warnings],
-    }
-  }
+    } satisfies Outcome
+  })
   /** The invocation without any mutation control, in the negotiated machine format. */
   const replan = withMachineFormat(
     withoutFlag(withoutFlag(withoutFlag(mode.argv, "--confirm", true), "--yes"), "-y"),
     formatArgs(mode.format),
   )
   const discover = [{ message: "list every command and flag", args: ["describe", "--json"] }]
-  /** The command this invocation named, for guides on an interrupted run. */
-  const invoked = surfaces.find(
-    (surface) => surface.name === resolveCommandPath(surfaces, mode.argv).named,
-  )
-
   if (Exit.isSuccess(exit)) {
     return { writes: [], code: ExitCode.success }
   }
   if (Cause.hasInterruptsOnly(exit.cause)) {
+    const { command: invoked } = yield* inspectInvocation(surfaces, mode)
     // An interrupted run still ends its stream with a terminal event, so a
     // consumer that already saw progress never sees a stream without an end.
     return {
       writes: render(
-        guided(
+        yield* guided(
           {
             kind: "failure",
             code: "interrupted",
@@ -81,7 +81,10 @@ export const settleExit = (options: {
             transient: true,
           },
           {
-            next: [{ message: "re-run and re-plan against the current state", args: replan }],
+            next:
+              invoked === undefined
+                ? []
+                : [{ message: "re-run and re-plan against the current state", args: replan }],
             guides: invoked?.guides,
           },
         ),
@@ -116,7 +119,7 @@ export const settleExit = (options: {
       }
       return {
         writes: render(
-          guided(
+          yield* guided(
             {
               kind: "failure",
               code: error.code,
@@ -143,7 +146,7 @@ export const settleExit = (options: {
       }
       return {
         writes: render(
-          guided(
+          yield* guided(
             {
               kind: "failure",
               code: "invalid_usage",
@@ -173,7 +176,7 @@ export const settleExit = (options: {
     }),
     code: ExitCode.internalDefect,
   }
-}
+})
 
 /**
  * A closed stdout arrives as a PlatformError from the Stdio service with the

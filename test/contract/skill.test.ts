@@ -1,8 +1,10 @@
+import { NodeServices } from "@effect/platform-node"
+import { Effect } from "effect"
 import { readFileSync } from "node:fs"
 import { basename, dirname, join } from "node:path"
 import { describe, expect, it } from "vitest"
 import { contracts } from "../../src/commands/index.ts"
-import { validateInvocation } from "../../src/contract/invocation.ts"
+import { validateInvocation } from "../../src/contract/adapter.ts"
 import { surfaceOf } from "../../src/contract/surface.ts"
 import { isGuideTopic } from "../../src/guides/catalog.ts"
 import { CLI_NAME } from "../../src/meta.ts"
@@ -65,10 +67,17 @@ describe("shipped skill", () => {
     }
   })
 
-  it("names only real commands with declared flags", () => {
-    for (const span of invocations()) {
-      expect(validateInvocation(surfaces, argvOf(span)), span).toBeUndefined()
-    }
+  it("names only real commands with declared flags", async () => {
+    await Promise.all(
+      invocations().map(async (span) => {
+        expect(
+          await Effect.runPromise(
+            validateInvocation(surfaces, argvOf(span)).pipe(Effect.provide(NodeServices.layer)),
+          ),
+          span,
+        ).toBeUndefined()
+      }),
+    )
   })
 
   it("routes every named guide topic to a real topic", () => {
