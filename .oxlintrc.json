@@ -13,6 +13,9 @@
   "plugins": ["typescript", "oxc", "unicorn", "import", "vitest"],
   "rules": {
     "no-console": "error",
+    "prefer-const": "error",
+    "unicorn/no-abusive-eslint-disable": "error",
+    "unicorn/prefer-node-protocol": "error",
     "vitest/no-disabled-tests": "error",
     "vitest/no-focused-tests": "error",
     "vitest/warn-todo": "error",
