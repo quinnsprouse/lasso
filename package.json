@@ -46,7 +46,7 @@
     "@effect/platform-node": "4.0.0-rc.117",
     "@effect/tsgo": "0.45.0",
     "@effect/vitest": "4.0.0-rc.117",
-    "@types/node": "22.20.4",
+    "@types/node": "26.6.2",
     "@vitest/coverage-v8": "5.0.1",
     "effect": "4.0.0-rc.117",
     "execa": "10.0.1",
