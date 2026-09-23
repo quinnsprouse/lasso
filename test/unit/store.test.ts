@@ -59,10 +59,14 @@ const load = Effect.gen(function* () {
   return yield* reader.load
 }).pipe(Effect.provide(layer))
 
+/** Writes what `transform` returns (null: no write) and returns the tasks after it. */
 const modify = (transform: (tasks: ReadonlyArray<Task>) => ReadonlyArray<Task> | null) =>
   Effect.gen(function* () {
     const writer = yield* StoreWriter
-    return yield* writer.modify(transform)
+    return yield* writer.modify((tasks) => {
+      const next = transform(tasks)
+      return { next, result: next ?? tasks }
+    })
   }).pipe(Effect.provide(layer))
 
 const seed = (id: string) =>

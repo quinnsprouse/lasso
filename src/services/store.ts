@@ -27,11 +27,20 @@ export interface StoreReaderApi {
   readonly load: Effect.Effect<ReadonlyArray<Task>, AppError>
 }
 
+/**
+ * What a transform decides inside the lock: the tasks to write (null leaves
+ * the file untouched) and the result `modify` returns to the caller.
+ */
+interface Change<A> {
+  readonly next: ReadonlyArray<Task> | null
+  readonly result: A
+}
+
 export interface StoreWriterApi {
-  /** Atomic read-transform-write under a lock. Return null to leave the file untouched. */
-  readonly modify: (
-    transform: (tasks: ReadonlyArray<Task>) => ReadonlyArray<Task> | null,
-  ) => Effect.Effect<ReadonlyArray<Task>, AppError>
+  /** Atomic read-decide-write under a lock; the decision comes back as `result`. */
+  readonly modify: <A>(
+    transform: (tasks: ReadonlyArray<Task>) => Change<A>,
+  ) => Effect.Effect<A, AppError>
 }
 
 const DIR = ".lasso"
@@ -140,53 +149,52 @@ export class StoreWriter extends Context.Service<StoreWriter, StoreWriterApi>()(
 
         const releaseLock = fs.remove(lock, { recursive: true }).pipe(Effect.ignore)
 
-        const modify: StoreWriterApi["modify"] = Effect.fn("StoreWriter.modify")(
-          function* (transform) {
-            return yield* Effect.acquireUseRelease(
-              acquireLock,
-              Effect.fn("StoreWriter.modify.use")(function* () {
-                const current = yield* loadFrom(fs, file)
-                const next = transform(current)
-                if (next === null) {
-                  return current
-                }
-                const encoded = yield* encodeStore({ tasks: next }).pipe(
-                  Effect.mapError((cause) =>
-                    Errors.invalidData({
-                      message: `tasks failed to encode: ${cause.message}`,
-                      fix: "this is a bug in the Task schema or the transform; report the command you ran",
-                    }),
-                  ),
-                )
-                yield* fs.writeFileString(tmp, `${encoded}\n`).pipe(
-                  Effect.mapError(asCannotWrite(`write ${tmp}`)),
-                  Effect.andThen(
-                    fs.rename(tmp, file).pipe(Effect.mapError(asCannotWrite(`replace ${file}`))),
-                  ),
-                  // A failed or interrupted write leaves no temp file behind.
-                  Effect.onError(() => fs.remove(tmp).pipe(Effect.ignore)),
-                )
-                return next
+        const modify: StoreWriterApi["modify"] = Effect.fn("StoreWriter.modify")(function* <A>(
+          transform: (tasks: ReadonlyArray<Task>) => Change<A>,
+        ) {
+          return yield* Effect.acquireUseRelease(
+            acquireLock,
+            Effect.fn("StoreWriter.modify.use")(function* () {
+              const { next, result } = transform(yield* loadFrom(fs, file))
+              if (next === null) {
+                return result
+              }
+              const encoded = yield* encodeStore({ tasks: next }).pipe(
+                Effect.mapError((cause) =>
+                  Errors.invalidData({
+                    message: `tasks failed to encode: ${cause.message}`,
+                    fix: "this is a bug in the Task schema or the transform; report the command you ran",
+                  }),
+                ),
+              )
+              yield* fs.writeFileString(tmp, `${encoded}\n`).pipe(
+                Effect.mapError(asCannotWrite(`write ${tmp}`)),
+                Effect.andThen(
+                  fs.rename(tmp, file).pipe(Effect.mapError(asCannotWrite(`replace ${file}`))),
+                ),
+                // A failed or interrupted write leaves no temp file behind.
+                Effect.onError(() => fs.remove(tmp).pipe(Effect.ignore)),
+              )
+              return result
+            }),
+            () => releaseLock,
+          ).pipe(
+            // Retry contention only, between attempts, where Ctrl-C and SIGTERM
+            // can still interrupt a writer queued behind another one.
+            Effect.retry({
+              // Jitter spreads writers that collided so they do not collide again.
+              schedule: Schedule.spaced("25 millis").pipe(Schedule.jittered),
+              times: 40,
+              while: (error) => error._tag === "LockBusy",
+            }),
+            Effect.catchTag("LockBusy", () =>
+              Errors.transientFailure({
+                message: "the task store is locked by another process",
+                fix: "retry the command",
               }),
-              () => releaseLock,
-            ).pipe(
-              // Retry contention only, between attempts, where Ctrl-C and SIGTERM
-              // can still interrupt a writer queued behind another one.
-              Effect.retry({
-                // Jitter spreads writers that collided so they do not collide again.
-                schedule: Schedule.spaced("25 millis").pipe(Schedule.jittered),
-                times: 40,
-                while: (error) => error._tag === "LockBusy",
-              }),
-              Effect.catchTag("LockBusy", () =>
-                Errors.transientFailure({
-                  message: "the task store is locked by another process",
-                  fix: "retry the command",
-                }),
-              ),
-            )
-          },
-        )
+            ),
+          )
+        })
 
         return StoreWriter.of({ modify })
       }),

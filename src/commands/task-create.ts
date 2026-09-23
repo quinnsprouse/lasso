@@ -113,9 +113,11 @@ export const taskCreate = defineMutation({
   apply: Effect.fn("taskCreate.apply")(function* (plan) {
     const writer = yield* StoreWriter
     if (plan.action === "no_op") {
-      // null avoids a write that would notify file watchers on a no-op.
-      const tasks = yield* writer.modify(() => null)
-      const existing = tasks.find((task) => task.id === plan.taskId)
+      // next: null avoids a write that would notify file watchers on a no-op.
+      const existing = yield* writer.modify((current) => ({
+        next: null,
+        result: current.find((task) => task.id === plan.taskId),
+      }))
       if (existing === undefined) {
         return yield* Errors.staleConfirmation({
           message: `task "${plan.taskId}" no longer exists — the no-op plan is stale`,
@@ -126,17 +128,17 @@ export const taskCreate = defineMutation({
     }
     const now = yield* DateTime.now
     const task = new Task({ ...plan.task, createdAt: DateTime.formatIso(now) })
-    // null writes nothing, so a rejected create leaves the file untouched.
-    const tasks = yield* writer.modify((current) =>
-      current.some((existing) => existing.id === task.id) ? null : [...current, task],
-    )
-    if (tasks.includes(task)) {
-      return { created: true, task }
-    }
-    // Another writer created the id between plan and apply.
-    const winner = tasks.find((existing) => existing.id === task.id)
-    if (plan.ifExists === "skip" && winner !== undefined) {
-      return { created: false, task: winner }
+    // The decision is made inside the lock; a rejected create writes nothing.
+    const outcome = yield* writer.modify((current) => {
+      const winner = current.find((existing) => existing.id === task.id)
+      return winner === undefined
+        ? { next: [...current, task], result: { created: true, task } }
+        : { next: null, result: { created: false, task: winner } }
+    })
+    // Another writer created the id between plan and apply: --if-not-exists
+    // makes that the promised no-op; a plain create is a conflict.
+    if (outcome.created || plan.ifExists === "skip") {
+      return outcome
     }
     return yield* Errors.resourceConflict({
       message: `task "${task.id}" was created by another process`,

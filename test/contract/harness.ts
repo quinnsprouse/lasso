@@ -98,7 +98,7 @@ export const makeInvoke =
       Layer.succeed(StoreReader, StoreReader.of({ load: Effect.succeed(tasks) })),
       Layer.succeed(
         StoreWriter,
-        StoreWriter.of({ modify: (transform) => Effect.sync(() => transform(tasks) ?? tasks) }),
+        StoreWriter.of({ modify: (transform) => Effect.sync(() => transform(tasks).result) }),
       ),
       Layer.succeed(TaskFeed, TaskFeed.of({ titles: () => Effect.succeed(feed) })),
     )

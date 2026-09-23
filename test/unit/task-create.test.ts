@@ -26,12 +26,9 @@ const writerWith = (initial: ReadonlyArray<Task>) => {
     StoreWriter.of({
       modify: (transform) =>
         Effect.sync(() => {
-          const next = transform(states.at(-1)!)
-          if (next === null) {
-            return states.at(-1)!
-          }
-          states.push(next)
-          return next
+          const { next, result } = transform(states.at(-1)!)
+          if (next !== null) states.push(next)
+          return result
         }),
     }),
   )

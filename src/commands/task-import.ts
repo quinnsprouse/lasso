@@ -72,13 +72,19 @@ export const taskImport = defineMutation({
 
     const adds: Array<Planned> = []
     const skips: Array<Skipped> = []
+    const added = new Set<string>()
     for (const title of titles.map((raw) => raw.trim())) {
       const id = taskId(title)
-      if (id === "task_") skips.push({ title, reason: "no_identifier" })
-      else if (existing.has(id)) skips.push({ title, reason: "already_exists" })
-      else if (adds.some((task) => task.id === id))
+      if (id === "task_") {
+        skips.push({ title, reason: "no_identifier" })
+      } else if (existing.has(id)) {
+        skips.push({ title, reason: "already_exists" })
+      } else if (added.has(id)) {
         skips.push({ title, reason: "repeated_in_feed" })
-      else adds.push({ id, title, status: "open" })
+      } else {
+        added.add(id)
+        adds.push({ id, title, status: "open" })
+      }
     }
     return { source: url.href, adds, skips }
   }),
@@ -86,17 +92,21 @@ export const taskImport = defineMutation({
     const writer = yield* StoreWriter
     const createdAt = DateTime.formatIso(yield* DateTime.now)
     const planned = plan.adds.map((task) => new Task({ ...task, createdAt }))
-    const tasks = yield* writer.modify((current) => {
-      const taken = new Set(current.map((task) => task.id))
-      const fresh = planned.filter((task) => !taken.has(task.id))
-      return fresh.length === 0 ? null : [...current, ...fresh]
-    })
     // Ids another writer created since the plan are skipped, not failed: the
     // import is idempotent, so its outcome is the same either way.
-    const imported = planned.filter((task) => tasks.includes(task))
-    const raced = planned
-      .filter((task) => !tasks.includes(task))
-      .map((task): Skipped => ({ title: task.title, reason: "already_exists" }))
+    const { imported, raced } = yield* writer.modify((current) => {
+      const taken = new Set(current.map((task) => task.id))
+      const fresh = planned.filter((task) => !taken.has(task.id))
+      return {
+        next: fresh.length === 0 ? null : [...current, ...fresh],
+        result: {
+          imported: fresh,
+          raced: planned
+            .filter((task) => taken.has(task.id))
+            .map((task): Skipped => ({ title: task.title, reason: "already_exists" })),
+        },
+      }
+    })
     return { imported, skipped: [...plan.skips, ...raced] }
   }),
   next: () => [

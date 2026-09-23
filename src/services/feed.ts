@@ -43,18 +43,18 @@ export class TaskFeed extends Context.Service<TaskFeed, TaskFeedApi>()("lasso/se
           onSome: (secret) =>
             HttpClientRequest.get(url).pipe(HttpClientRequest.bearerToken(secret)),
         })
-        const response = yield* client
-          .execute(request)
-          .pipe(
-            Effect.timeout(timeout),
-            Effect.mapError(httpFailure(url.host, ENVIRONMENT.feedToken)),
-          )
-        const feed = yield* HttpClientResponse.schemaBodyJson(Feed)(response).pipe(
-          Effect.mapError((cause) =>
-            Errors.invalidData({
-              message: `${url.href} is not a task feed: ${cause.message}`,
-              fix: 'point at JSON of the form {"tasks":[{"title":"…"}]}',
-            }),
+        // One timeout for the whole exchange: fetch resolves once headers
+        // arrive, so a stalled body must count against the same limit.
+        const feed = yield* client.execute(request).pipe(
+          Effect.flatMap(HttpClientResponse.schemaBodyJson(Feed)),
+          Effect.timeout(timeout),
+          Effect.mapError((error) =>
+            Schema.isSchemaError(error)
+              ? Errors.invalidData({
+                  message: `${url.href} is not a task feed: ${error.message}`,
+                  fix: 'point at JSON of the form {"tasks":[{"title":"…"}]}',
+                })
+              : httpFailure(url.host, ENVIRONMENT.feedToken)(error),
           ),
         )
         return feed.tasks.map((task) => task.title)

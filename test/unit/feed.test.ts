@@ -18,6 +18,13 @@ const FEED = new URL("https://feed.test/tasks.json")
 
 type Reply = Response | "network down" | "hang"
 
+/** Headers now, then a body that never finishes: fetch has resolved, the exchange has not. */
+const stalledBody = () =>
+  new Response(new ReadableStream({ start: () => {} }), {
+    status: 200,
+    headers: { "content-type": "application/json" },
+  })
+
 const serving = (reply: (request: HttpClientRequest.HttpClientRequest) => Reply) => {
   const seen: Array<HttpClientRequest.HttpClientRequest> = []
   const client = HttpClient.make((request) => {
@@ -118,6 +125,15 @@ describe("TaskFeed", () => {
       )
       expect(error.code).toBe("transient_failure")
       expect(error.fix).toContain("LASSO_HTTP_TIMEOUT")
+    }),
+  )
+
+  it.live("the timeout covers the body too, not only the headers", () =>
+    Effect.gen(function* () {
+      const error = yield* Effect.flip(
+        titles(serving(stalledBody), { LASSO_HTTP_TIMEOUT: "50 millis" }),
+      )
+      expect(error.code).toBe("transient_failure")
     }),
   )
 
