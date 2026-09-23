@@ -219,11 +219,14 @@ step("non-interactive safety: missing input fails fast, never hangs", () => {
 
 step("agent workflow: the command generator yields a green Fast profile", () => {
   sh("node scripts/new-command.mjs task ping")
+  sh("node scripts/new-command.mjs task archive --mutation")
   sh("npm run check")
 })
 
 step("rename journey: the renamed template stays green", () => {
-  sh("node scripts/rename.mjs acme-cli")
+  // Derived, not spelled out: rename refuses a name that already appears in a file.
+  const renamed = `${binName}-renamed`
+  sh(`node scripts/rename.mjs ${renamed}`)
   sh("npm run check")
   const renamedDescribe = JSON.parse(
     execFileSync("node", ["src/bin.ts", "describe", "--json"], {
@@ -231,7 +234,7 @@ step("rename journey: the renamed template stays green", () => {
       encoding: "utf8",
     }),
   )
-  if (renamedDescribe.data.cli.name !== "acme-cli") {
+  if (renamedDescribe.data.cli.name !== renamed) {
     throw new Error("describe still reports the old CLI name after rename")
   }
   sh(`node scripts/rename.mjs ${binName}`)

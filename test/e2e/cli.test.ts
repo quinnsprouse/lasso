@@ -1,11 +1,14 @@
 import { once } from "node:events"
-import { mkdtemp, rm } from "node:fs/promises"
+import { mkdir, mkdtemp, rm, stat, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { execaNode } from "execa"
-import { afterEach, beforeEach, describe, expect, it } from "vitest"
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 
 // Run the built artifact after tsdown, using the same Node executable as the test runner.
+// Cases spawn the binary several times; under coverage on a loaded runner that
+// outlasts Vitest's 5 s default without anything hanging.
+vi.setConfig({ testTimeout: 20_000 })
 
 const BIN = join(import.meta.dirname, "..", "..", "dist", "bin.cjs")
 
@@ -150,6 +153,16 @@ describe("mutation protocol", () => {
     ])
     expect(result.exitCode).toBe(64)
     expect(parse(result.stdout).error.code).toBe("stale_confirmation")
+  })
+
+  it("a broken store under --confirm keeps its own code instead of looking stale", async () => {
+    const preview = await run(["task", "create", "Ship", "--json"])
+    const { confirmArgs } = parse(preview.stdout).confirmation
+    await mkdir(join(cwd, ".lasso"), { recursive: true })
+    await writeFile(join(cwd, ".lasso", "tasks.json"), '{"tasks":[{"id":1}]}')
+    const replay = await run(confirmArgs)
+    expect(replay.exitCode).toBe(78)
+    expect(parse(replay.stdout).error.code).toBe("invalid_config")
   })
 
   it("--dry-run changes nothing", async () => {
@@ -303,7 +316,6 @@ describe("machine help with a full command line", () => {
 
 describe("task audit failure path", () => {
   it("a corrupt store is invalid_config with exit 78 and a repair fix", async () => {
-    const { mkdir, writeFile } = await import("node:fs/promises")
     await mkdir(join(cwd, ".lasso"), { recursive: true })
     await writeFile(join(cwd, ".lasso", "tasks.json"), "{ not json")
     const result = await run(["task", "audit", "--json"])
@@ -316,7 +328,6 @@ describe("task audit failure path", () => {
 
 describe("store identity", () => {
   it("an --if-not-exists no-op does not rewrite the store file", async () => {
-    const { stat } = await import("node:fs/promises")
     await run(["task", "create", "Same", "--yes", "--json"])
     const before = await stat(join(cwd, ".lasso", "tasks.json"))
     const result = await run(["task", "create", "Same", "--if-not-exists", "--yes", "--json"])

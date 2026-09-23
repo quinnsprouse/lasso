@@ -1,9 +1,10 @@
 # Adding commands
 
-Start with the generator — it scaffolds a query, registers it, formats, records the surface snapshot, and leaves the Fast profile green (the Starter Contract proves this on every CI run). For a mutation, generate the skeleton and replace `defineQuery` with `defineMutation` (AGENTS.md, "Changing the surface", lists the full steps):
+Start with the generator — it scaffolds a command, registers it, formats, records the surface snapshot, and leaves the Fast profile green (the Starter Contract proves this for both kinds on every CI run). `--mutation` scaffolds `defineMutation` and adds its plan fixture (AGENTS.md, "Changing the surface", lists the remaining steps):
 
 ```bash
-node scripts/new-command.mjs task ping     # creates src/commands/task-ping.ts, registers it
+node scripts/new-command.mjs task ping                 # query: src/commands/task-ping.ts, registered
+node scripts/new-command.mjs task archive --mutation   # mutation, plus its case in test/fixtures/mutations.ts
 npm run check
 ```
 
@@ -65,7 +66,7 @@ Rules enforced mechanically (type system where possible, contract-invariant test
 - Framework flags (`--dry-run`, `--confirm`, `--yes`, `--fields`) and error codes are added by the runtime and appear in `describe` automatically — never redeclare them. Reserved aliases: `h`, `v`, `y`.
 - Choice params declare `choices`; boolean flags cannot have defaults; arguments take no alias/default. All of these fail `tsc` (see `test/contract/type-fixtures.ts`).
 - Param keys are lowerCamelCase; summaries are at most 88 characters; every example starts with the bin name (invariant tests).
-- Contradictory controls (`--dry-run` with `--yes`/`--confirm`) are rejected by the runtime before planning.
+- Contradictory controls (`--dry-run` with `--yes`/`--confirm`) are rejected by the runtime before planning, and so is any flag given twice, including `--yes --no-yes`.
 
 ## Errors
 

@@ -22,7 +22,7 @@ Replay `confirmArgs` verbatim: it is the original argv plus `--confirm <token>` 
 
 `task create` conflicts when the derived id already exists. With `--if-not-exists`, the conflict becomes a plan variant, `{ "action": "no_op", "reason": "already_exists", "taskId": "task_…" }`, that applies as a successful no-op: `created: false`, the existing task in `task`, and no write to the store file.
 
-The token binds the plan, not the flags. When the task does not exist yet, `--if-not-exists` changes nothing about the plan, so a preview taken without it confirms with it added; when the task exists, the plan becomes the `no_op` variant and the token differs.
+The plan also records the policy for a race, `"ifExists": "skip"` or `"fail"`: when another writer creates the same id between plan and apply, `--if-not-exists` still ends as that no-op, and a plain create fails with `resource_conflict`. Because the token binds the whole plan, a preview taken without `--if-not-exists` does not confirm with it added; preview with the flags you will confirm with.
 
 ## What an interrupted run means
 

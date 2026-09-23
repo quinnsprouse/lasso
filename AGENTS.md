@@ -11,7 +11,7 @@ npm run doctor -- --json        # workspace health; every reported problem carri
 npm run dev -- task list --json # run from source
 ```
 
-Node 22.19 or newer, npm 10 or newer. Disposable experiments go in `.scratch/` or the OS temp directory, never the repository root.
+Node ^22.19, ^24.11, or 26 and newer (the dev toolchain's range; the shipped CLI runs on any Node 22.19 or newer), npm 10 or newer. Disposable experiments go in `.scratch/` or the OS temp directory, never the repository root.
 
 Replace the demo in `src/domain/`, `src/commands/task-*.ts`, and `src/services/store.ts`. Update service wiring in `src/services/index.ts` and command registration in `src/commands/index.ts`. Replace the task-specific unit and command tests, `test/fixtures/mutations.ts`, the demo services in `test/contract/harness.ts`, and the task journeys in the e2e suite and `scripts/starter-contract.mjs`. The demo also includes `guides/topics/`, the router rows in `skills/lasso/SKILL.md`, and the `.lasso/` state directory.
 
@@ -25,7 +25,7 @@ Keep the contract definitions, parser adapter, output protocol, and reusable che
 - One test file: `node node_modules/vitest/vitest.mjs run test/unit/token.test.ts` (`npx vitest` is refused: unpinned executor). E2E needs `npm run build` first.
 - Debug from source: `node --inspect-brk src/bin.ts <args>`; the shipped artifact: `npm run build && node --inspect-brk dist/bin.cjs <args>`.
 
-Never skip, focus, or `.todo` a test to get green; Vitest lint rules fail the Fast profile on any of them, and `allowOnly: false` rejects focused tests even when run directly. When the post-edit hook reports a failure, repair the file it names and run `npm run check`. When it reports an incomplete toolchain, run `npm ci`. When the Stop hook reports the tree is red, fix that before finishing.
+Never skip, focus, or `.todo` a test to get green; Vitest lint rules fail the Fast profile on any of them (including `it.effect.skip`), and `allowOnly: false` rejects focused tests even when run directly. Likewise, never loosen a lint rule, threshold, or compiler option to get green, and give every suppression a `-- reason` (a test enforces it); the guard asks a person to approve edits to check configuration. When the post-edit hook reports a failure, repair the file it names and run `npm run check`. When it reports an incomplete toolchain, run `npm ci`. When the Stop hook reports the tree is red, fix that before finishing.
 
 ## Rules
 
@@ -38,14 +38,15 @@ Never skip, focus, or `.todo` a test to get green; Vitest lint rules fail the Fa
 
 ## Changing the surface
 
-Add a query (the generator scaffolds, registers, formats, and records the snapshot in one transaction):
+Add a command with the generator. It scaffolds, registers, formats, and records the snapshot in one transaction; `--mutation` also adds the required plan fixture:
 
 ```bash
-node scripts/new-command.mjs <group> <name>
+node scripts/new-command.mjs <group> <name>              # query
+node scripts/new-command.mjs <group> <name> --mutation   # plan + apply
 npm run check
 ```
 
-For a mutation, generate the skeleton, then replace `defineQuery` with `defineMutation`: add `planSchema`, `plan` (read services), `apply` (write services), and `idempotency`; add a unit test through fake layers (`test/unit/task-create.test.ts` is the pattern), explicit cases in `test/fixtures/mutations.ts`, and a happy-path plus a failure e2e case; then `npm run surface:update` (the generator recorded only the query).
+For a mutation, implement `plan` (read services) and `apply` (write services), set `idempotency`, then extend the generated case in `test/fixtures/mutations.ts` with one case per plan branch and expected error. Add a unit test through fake layers (`test/unit/task-create.test.ts` is the pattern) and a happy-path plus a failure e2e case, then `npm run surface:update`. The generator prints these steps.
 
 A new or edited guide topic: edit `guides/topics/<topic>.md`, run `node scripts/guides.mjs`, optionally declare it on a contract (`guides: [...]`), then record the surface change as below.
 
@@ -63,14 +64,15 @@ To add an expected error code: add the `ERROR_CATALOG` row and the `Errors.*` fa
 
 ## Effect
 
-Before writing Effect code, read `node_modules/effect/AGENTS.md`; for API details use `node_modules/effect/ai-docs/src`, which matches the installed version. `effect` and `@effect/platform-node` are exact-pinned to the same beta; generic `effect@beta` install instructions never override those pins. Use `Effect.fn("name")(function* …)` for handlers, plans, applies, and service methods that return generator effects; a handler with no services and no failure may return `Effect.succeed` or `Effect.sync` directly. Reach the world through services, never `node:fs`, `process`, global `fetch`, `Date`, or Effect `Console`.
+Before writing Effect code, read `node_modules/effect/AGENTS.md`; for API details use `node_modules/effect/ai-docs/src`, which matches the installed version. `effect`, `@effect/platform-node`, and `@effect/vitest` are exact-pinned to the same release candidate; generic `effect@beta` or `effect@latest` (v3) install instructions never override those pins. Use `Effect.fn("name")(function* …)` for handlers, plans, applies, and service methods that return generator effects; a handler with no services and no failure may return `Effect.succeed` or `Effect.sync` directly. Reach the world through services, never `node:fs`, `process`, global `fetch`, `Date`, or Effect `Console`.
 
 ## Claude Code guards
 
 `.claude/hooks/` backs the rules while you work; details in [docs/agents/GUARDS.md](docs/agents/GUARDS.md).
 
-- `guard.mjs` checks direct commands for common hook bypasses, destructive git operations, unpinned tool execution, and deletion of git metadata or the lockfile. It also protects generated files from Edit/Write. It does not interpret shell programs; see GUARDS.md for its scope.
-- `post-edit.mjs` formats edited files and lints scripts. Effect rules run with lint. Full project typechecking after each TypeScript edit is opt-in with `LASSO_POST_EDIT_FULL=1`; `npm run check` always runs it.
+- `guard.mjs` checks direct commands for common hook bypasses, destructive git operations, unpinned tool execution, and deletion of git metadata or the lockfile. It protects generated files from Edit/Write, and asks a person to approve edits to check configuration (lint, types, tests, hooks, CI). It does not interpret shell programs; see GUARDS.md for its scope.
+- `post-edit.mjs` formats edited files and lints scripts. Effect rules run with lint. An edited guide topic regenerates the catalog. Full project typechecking after each TypeScript edit is opt-in with `LASSO_POST_EDIT_FULL=1`; `npm run check` always runs it.
+- `settings.json` pre-approves the verification and generator commands and denies reading `.env` files.
 - `session-start.mjs` prints the doctor's failing checks (or one healthy line); `stop-check.mjs` runs the Fast profile when the tree is dirty and refuses to end the turn while it is red.
 
 Scripts and the post-edit hook resolve every tool through `scripts/lib/toolchain.mjs`; the git hooks invoke pinned `node_modules` entries directly; the session and stop hooks invoke repository scripts. Nothing runs through `npx`.

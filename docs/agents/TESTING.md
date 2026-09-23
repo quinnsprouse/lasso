@@ -1,12 +1,12 @@
 # Testing
 
-Unit and contract tests run in Fast. Push adds e2e; CI adds coverage and the Starter Contract. Oxlint rejects skipped, focused, placeholder, and conditionally disabled tests. Vitest also rejects `.only` at runtime with `allowOnly: false`.
+Unit and contract tests run in Fast. Push adds e2e; CI adds coverage and the Starter Contract. Oxlint rejects skipped, focused, placeholder, and conditionally disabled tests, including the `@effect/vitest` forms (`it.effect.skip`, `it.live.only`). Vitest also rejects `.only` at runtime with `allowOnly: false`.
 
 The Vitest lint rules allow two `expect` arguments because the second is a diagnostic message. Conditional assertions remain allowed for contract invariants that inspect different command kinds. Test-title wording is not a lint concern.
 
 ## Unit (`test/unit/`) — logic through fake layers
 
-Handlers take services, so tests provide in-memory layers and run plan/apply as plain Effects — no filesystem, no CLI process. See `test/unit/task-create.test.ts` for the pattern (`Layer.succeed(StoreReader, StoreReader.of({ … }))`). Property-based tests (fast-check) pin confirmation-token stability under arbitrary plan shapes; `test/unit/store.test.ts` runs the real filesystem store in a temp directory.
+Handlers take services, so tests provide in-memory layers and run plan/apply as plain Effects — no filesystem, no CLI process. Write them with `it.effect` from `@effect/vitest`, which runs under `TestClock`: time moves only when the test sets it (`TestClock.setTime`), so timestamps are assertable. Use `it.live` when the code under test sleeps on real time (retries, timeouts). See `test/unit/task-create.test.ts` for the pattern (`Layer.succeed(StoreReader, StoreReader.of({ … }))`). Suites that set up real files or processes around an effect (the store, settlement, the in-process harness) may stay plain async tests. Property-based tests (fast-check) pin confirmation-token stability under arbitrary plan shapes; `test/unit/store.test.ts` runs the real filesystem store in a temp directory.
 
 ## Contract invariants (`test/contract/`) — mechanical protocol rejection
 
@@ -20,7 +20,7 @@ Handlers take services, so tests provide in-memory layers and run plan/apply as 
 
 ## Replacing mutation fixtures
 
-For each mutation, add `planFixture(command, { name, input, layer, expected })` to `test/fixtures/mutations.ts`. Supply a layer containing only the services its plan reads. Use `expected: { plan: ... }` for an encoded plan or `expected: { error: "code" }` for an expected failure. Include at least one successful case per registered mutation, and cover domain branches with explicit inputs and state.
+For each mutation, add `planFixture(command, { name, input, layer, expected })` to `test/fixtures/mutations.ts` (`new-command.mjs --mutation` inserts the first case). Supply a layer containing only the services its plan reads; `layer` is optional exactly when the plan reads none. Use `expected: { plan: ... }` for an encoded plan or `expected: { error: "code" }` for an expected failure. Include at least one successful case per registered mutation, and cover domain branches with explicit inputs and state.
 
 The shared `expectPlan` assertion runs each case twice with different clocks, compares the encoded plans, and checks a JSON round trip. It does not guess valid identifiers or enumerate flag combinations. Replace the fixtures when replacing the task demo; the assertion stays reusable.
 

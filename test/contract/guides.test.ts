@@ -9,6 +9,7 @@ import { GUIDE_TOPICS } from "../../src/guides/catalog.generated.ts"
 import { isGuideTopic } from "../../src/guides/catalog.ts"
 import { validateInvocation } from "../../src/contract/adapter.ts"
 import { CLI_NAME } from "../../src/meta.ts"
+import { argvOf } from "./harness.ts"
 
 /**
  * Guide invariants: the catalog is honest and every command it mentions is
@@ -19,14 +20,6 @@ import { CLI_NAME } from "../../src/meta.ts"
 
 const TOPIC_DIR = join(import.meta.dirname, "..", "..", "guides", "topics")
 const surfaces = contracts.map(surfaceOf)
-
-/** Fills placeholders and splits a fenced `<bin> …` line into argv (quoted spans stay one token). */
-const argvOf = (line: string): ReadonlyArray<string> =>
-  line
-    .replace(/<[^>]+>/g, "x")
-    .match(/"[^"]*"|\S+/g)!
-    .slice(1)
-    .map((token) => token.replace(/^"|"$/g, ""))
 
 describe("guide catalog", () => {
   const topics = GUIDE_TOPICS

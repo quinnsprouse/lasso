@@ -6,7 +6,7 @@ Each command is one contract that generates its parsing, help, schemas, and docs
 
 ## Quick start
 
-Use Node 22.19 or newer, npm 10 or newer, and Git.
+Use Node ^22.19, ^24.11, or 26 and newer, npm 10 or newer, and Git. (The CLI you ship runs on any Node 22.19 or newer.)
 
 ```bash
 npx degit quinnsprouse/lasso my-cli   # or: gh repo create my-cli --template quinnsprouse/lasso --clone
@@ -47,7 +47,7 @@ npm run check:push                           # add build, dead code, e2e, and pa
 npm run check:ci                             # add coverage and the Starter Contract
 npm run build                                # build dist/bin.cjs
 npm run test:starter                         # test a fresh archive of the starter
-node scripts/new-command.mjs <group> <name>  # scaffold and register a command
+node scripts/new-command.mjs <group> <name>  # scaffold and register a query (--mutation: plan + apply)
 node scripts/guides.mjs                      # inline guides/topics/*.md into the bundle
 npm run surface:update                       # record an additive surface change
 npm run setup                                # install Git hooks
@@ -59,7 +59,7 @@ Agents start with [AGENTS.md](AGENTS.md). [CONTEXT.md](CONTEXT.md) defines proje
 
 ## Stack
 
-- [Effect](https://effect.website) v4 beta with `effect/unstable/cli`
+- [Effect](https://effect.website) v4 release candidate with `effect/unstable/cli`, tested with `@effect/vitest`
 - TypeScript 7 with type-aware [oxlint](https://oxc.rs) and [Biome](https://biomejs.dev)
 - [tsdown](https://tsdown.dev) with one self-contained CommonJS bundle
 - [Vitest](https://vitest.dev), fast-check, and execa

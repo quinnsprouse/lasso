@@ -1,8 +1,8 @@
-import { Effect, FileSystem, Layer, Path, Stdio, Terminal } from "effect"
-import { ChildProcessSpawner } from "effect/unstable/process"
+import { Effect, Layer, Stdio } from "effect"
 import { describe, expect, it } from "vitest"
 import type { OutputMode } from "../../src/output/format.ts"
 import { Renderer } from "../../src/output/renderer.ts"
+import { testPlatform } from "../contract/harness.ts"
 
 /**
  * The terminal latch: once an outcome is emitted, any further output through
@@ -22,25 +22,7 @@ const mode: OutputMode = {
 const withRenderer = <A>(
   body: (renderer: Renderer["Service"]) => Effect.Effect<A, unknown>,
 ): Promise<A> => {
-  const environment = Layer.mergeAll(
-    FileSystem.layerNoop({}),
-    Path.layer,
-    Stdio.layerTest({}),
-    Layer.succeed(
-      Terminal.Terminal,
-      Terminal.make({
-        columns: Effect.succeed(80),
-        rows: Effect.succeed(24),
-        readInput: Effect.die("unused"),
-        readLine: Effect.die("unused"),
-        display: () => Effect.void,
-      }),
-    ),
-    Layer.succeed(
-      ChildProcessSpawner.ChildProcessSpawner,
-      ChildProcessSpawner.make(() => Effect.die("unused")),
-    ),
-  )
+  const environment = testPlatform(Stdio.layerTest({}))
   return Effect.runPromise(
     Effect.gen(function* () {
       const renderer = yield* Renderer

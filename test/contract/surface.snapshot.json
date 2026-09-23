@@ -417,7 +417,7 @@
         "transient": 75,
         "usage": 64
       },
-      "flagSpellings": "Boolean flags also accept a --no-<name> negated form and --<name>=true|false.",
+      "flagSpellings": "Boolean command flags also accept a --no-<name> negated form and --<name>=true|false; global flags do not.",
       "formats": ["json", "text", "ndjson"],
       "globalFlags": [
         {
@@ -489,11 +489,7 @@
                   "type": "string"
                 },
                 "title": {
-                  "allOf": [
-                    {
-                      "minLength": 1
-                    }
-                  ],
+                  "minLength": 1,
                   "type": "string"
                 }
               },
@@ -598,11 +594,7 @@
                   "type": "string"
                 },
                 "title": {
-                  "allOf": [
-                    {
-                      "minLength": 1
-                    }
-                  ],
+                  "minLength": 1,
                   "type": "string"
                 }
               },
@@ -661,6 +653,10 @@
                   "enum": ["create_task"],
                   "type": "string"
                 },
+                "ifExists": {
+                  "enum": ["fail", "skip"],
+                  "type": "string"
+                },
                 "task": {
                   "additionalProperties": false,
                   "properties": {
@@ -679,7 +675,7 @@
                   "type": "object"
                 }
               },
-              "required": ["action", "task"],
+              "required": ["action", "task", "ifExists"],
               "type": "object"
             },
             {
@@ -904,11 +900,7 @@
                     "type": "array"
                   },
                   "message": {
-                    "allOf": [
-                      {
-                        "minLength": 1
-                      }
-                    ],
+                    "minLength": 1,
                     "type": "string"
                   }
                 },
@@ -1006,11 +998,7 @@
                     "type": "array"
                   },
                   "message": {
-                    "allOf": [
-                      {
-                        "minLength": 1
-                      }
-                    ],
+                    "minLength": 1,
                     "type": "string"
                   }
                 },
@@ -1059,11 +1047,7 @@
                     "type": "array"
                   },
                   "message": {
-                    "allOf": [
-                      {
-                        "minLength": 1
-                      }
-                    ],
+                    "minLength": 1,
                     "type": "string"
                   }
                 },
@@ -1092,38 +1076,6 @@
         }
       },
       "streamEvent": {
-        "$defs": {
-          "Arrays_": {
-            "items": {
-              "additionalProperties": false,
-              "properties": {
-                "args": {
-                  "items": {
-                    "type": "string"
-                  },
-                  "type": "array"
-                },
-                "message": {
-                  "allOf": [
-                    {
-                      "minLength": 1
-                    }
-                  ],
-                  "type": "string"
-                }
-              },
-              "required": ["message", "args"],
-              "type": "object"
-            },
-            "type": "array"
-          },
-          "Arrays_1": {
-            "items": {
-              "type": "string"
-            },
-            "type": "array"
-          }
-        },
         "$schema": "https://json-schema.org/draft/2020-12/schema",
         "anyOf": [
           {
@@ -1158,11 +1110,7 @@
               "completed": {
                 "anyOf": [
                   {
-                    "allOf": [
-                      {
-                        "minimum": 0
-                      }
-                    ],
+                    "minimum": 0,
                     "type": "integer"
                   },
                   {
@@ -1175,29 +1123,17 @@
                 "type": "string"
               },
               "message": {
-                "allOf": [
-                  {
-                    "minLength": 1
-                  }
-                ],
+                "minLength": 1,
                 "type": "string"
               },
               "phase": {
-                "allOf": [
-                  {
-                    "pattern": "^[a-z][a-z0-9]*(-[a-z0-9]+)*$"
-                  }
-                ],
+                "pattern": "^[a-z][a-z0-9]*(-[a-z0-9]+)*$",
                 "type": "string"
               },
               "total": {
                 "anyOf": [
                   {
-                    "allOf": [
-                      {
-                        "minimum": 1
-                      }
-                    ],
+                    "minimum": 1,
                     "type": "integer"
                   },
                   {
@@ -1218,10 +1154,30 @@
                 "type": "string"
               },
               "guides": {
-                "$ref": "#/$defs/Arrays_1"
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
               },
               "next": {
-                "$ref": "#/$defs/Arrays_"
+                "items": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "args": {
+                      "items": {
+                        "type": "string"
+                      },
+                      "type": "array"
+                    },
+                    "message": {
+                      "minLength": 1,
+                      "type": "string"
+                    }
+                  },
+                  "required": ["message", "args"],
+                  "type": "object"
+                },
+                "type": "array"
               }
             },
             "required": ["event", "data", "next", "guides"],
@@ -1254,10 +1210,30 @@
                 "type": "string"
               },
               "guides": {
-                "$ref": "#/$defs/Arrays_1"
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
               },
               "next": {
-                "$ref": "#/$defs/Arrays_"
+                "items": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "args": {
+                      "items": {
+                        "type": "string"
+                      },
+                      "type": "array"
+                    },
+                    "message": {
+                      "minLength": 1,
+                      "type": "string"
+                    }
+                  },
+                  "required": ["message", "args"],
+                  "type": "object"
+                },
+                "type": "array"
               },
               "plan": {}
             },
@@ -1313,10 +1289,30 @@
                 "type": "string"
               },
               "guides": {
-                "$ref": "#/$defs/Arrays_1"
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
               },
               "next": {
-                "$ref": "#/$defs/Arrays_"
+                "items": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "args": {
+                      "items": {
+                        "type": "string"
+                      },
+                      "type": "array"
+                    },
+                    "message": {
+                      "minLength": 1,
+                      "type": "string"
+                    }
+                  },
+                  "required": ["message", "args"],
+                  "type": "object"
+                },
+                "type": "array"
               }
             },
             "required": ["event", "error", "next", "guides"],

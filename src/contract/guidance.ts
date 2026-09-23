@@ -78,6 +78,29 @@ export const withMachineFormat = (
 }
 
 /**
+ * argv with the first occurrence of `token` before any `--` terminator
+ * replaced by `replacement`. A flag token also matches its inline form
+ * (`--stauts=all` → `--status=all`). Undefined when the token is absent.
+ */
+export const withReplacedToken = (
+  argv: ReadonlyArray<string>,
+  token: string,
+  replacement: string,
+): ReadonlyArray<string> | undefined => {
+  const end = argv.includes("--") ? argv.indexOf("--") : argv.length
+  for (let i = 0; i < end; i++) {
+    const arg = argv[i]!
+    if (arg === token) {
+      return [...argv.slice(0, i), replacement, ...argv.slice(i + 1)]
+    }
+    if (token.startsWith("-") && arg.startsWith(`${token}=`)) {
+      return [...argv.slice(0, i), `${replacement}${arg.slice(token.length)}`, ...argv.slice(i + 1)]
+    }
+  }
+  return undefined
+}
+
+/**
  * argv with a control flag removed in every spelling the parser accepts:
  * `--flag`, `--flag=value`, `--no-flag`, and (for booleans) a following
  * literal such as `true`; a value-taking flag also drops its value.

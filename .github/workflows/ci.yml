@@ -18,6 +18,9 @@ jobs:
           # The minimum advertised runtime is verified on one platform.
           - os: ubuntu-latest
             node: 22.19.0
+          # The current release line, so the next LTS breaks here first.
+          - os: ubuntu-latest
+            node: 26
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1

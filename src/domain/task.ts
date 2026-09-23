@@ -17,10 +17,16 @@ export const TaskList = Schema.Struct({
   count: Schema.Int,
 })
 
-/** Identifiers are semantic and human-readable, never opaque UUIDs. */
+/**
+ * Identifiers are semantic and human-readable, never opaque UUIDs. The steps
+ * are documented in guides/topics/task-ids.md; keep the two in step.
+ */
 export const taskId = (title: string): string =>
   `task_${title
+    .normalize("NFC")
+    .replace(/[^\p{ASCII}]+/gu, "-")
     .toLowerCase()
     .replace(/[^a-z0-9]+/g, "-")
     .replace(/^-+|-+$/g, "")
-    .slice(0, 40)}`
+    .slice(0, 40)
+    .replace(/-+$/, "")}`

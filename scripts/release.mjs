@@ -65,4 +65,6 @@ process.stderr.write(`\nrelease ${version} prepared. To publish:\n\n`)
 process.stderr.write(`  git add -A && git commit -m "chore: release v${version}"\n`)
 process.stderr.write(`  git tag v${version}\n`)
 process.stderr.write(`  git push && git push origin v${version}\n\n`)
-process.stderr.write("the tag push triggers .github/workflows/release.yml (attest, then publish)\n")
+process.stderr.write(
+  "the tag push triggers .github/workflows/release.yml (verify, then publish with provenance)\n",
+)

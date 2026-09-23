@@ -30,3 +30,9 @@ export interface Guidance {
 }
 
 export const NEXT_LIMIT = 3
+
+/** The next move after any usage error: discover the real surface. */
+export const DISCOVER: NextAction = {
+  message: "list every command and flag",
+  args: ["describe", "--json"],
+}

@@ -1,10 +1,11 @@
-import { Clock, DateTime, Effect, Schema } from "effect"
+import { DateTime, Effect, Schema } from "effect"
 import { Task, taskId } from "../domain/task.ts"
 import { StoreReader, StoreWriter } from "../services/store.ts"
 import { Errors } from "../errors.ts"
 import { defineMutation } from "../contract/contract.ts"
 
-// The no-op decision belongs in the confirmed plan, not in apply-time flags.
+// Every decision apply makes comes from the confirmed plan, never from
+// apply-time flags: the no-op, and what to do when another writer wins a race.
 
 const CreatePlan = Schema.Union([
   Schema.Struct({
@@ -14,6 +15,8 @@ const CreatePlan = Schema.Union([
       title: Schema.String,
       status: Schema.Literal("open"),
     }),
+    /** --if-not-exists: a task created concurrently makes apply a no-op instead of a conflict. */
+    ifExists: Schema.Literals(["fail", "skip"]),
   }),
   Schema.Struct({
     action: Schema.Literal("no_op"),
@@ -104,6 +107,7 @@ export const taskCreate = defineMutation({
     return {
       action: "create_task" as const,
       task: { id, title, status: "open" as const },
+      ifExists: input.ifNotExists ? ("skip" as const) : ("fail" as const),
     }
   }),
   apply: Effect.fn("taskCreate.apply")(function* (plan) {
@@ -115,30 +119,29 @@ export const taskCreate = defineMutation({
       if (existing === undefined) {
         return yield* Errors.staleConfirmation({
           message: `task "${plan.taskId}" no longer exists — the no-op plan is stale`,
-          fix: "re-run without --confirm to get a fresh plan",
+          fix: "re-run the command without --yes or --confirm to plan against the current state",
         })
       }
       return { created: false, task: existing }
     }
-    const now = yield* Clock.currentTimeMillis
-    const task = new Task({ ...plan.task, createdAt: DateTime.formatIso(DateTime.makeUnsafe(now)) })
-    let conflicted = false
-    const tasks = yield* writer.modify((current) => {
-      if (current.some((existing) => existing.id === task.id)) {
-        // null: nothing is written, so a rejected mutation leaves the file untouched.
-        conflicted = true
-        return null
-      }
-      return [...current, task]
-    })
-    if (conflicted) {
-      return yield* Errors.resourceConflict({
-        message: `task "${task.id}" was created by another process`,
-        fix: "re-run with --if-not-exists to make this a no-op",
-      })
+    const now = yield* DateTime.now
+    const task = new Task({ ...plan.task, createdAt: DateTime.formatIso(now) })
+    // null writes nothing, so a rejected create leaves the file untouched.
+    const tasks = yield* writer.modify((current) =>
+      current.some((existing) => existing.id === task.id) ? null : [...current, task],
+    )
+    if (tasks.includes(task)) {
+      return { created: true, task }
     }
-    const created = tasks.find((existing) => existing.id === task.id)
-    return { created: true, task: created ?? task }
+    // Another writer created the id between plan and apply.
+    const winner = tasks.find((existing) => existing.id === task.id)
+    if (plan.ifExists === "skip" && winner !== undefined) {
+      return { created: false, task: winner }
+    }
+    return yield* Errors.resourceConflict({
+      message: `task "${task.id}" was created by another process`,
+      fix: "re-run with --if-not-exists to make this a no-op",
+    })
   }),
   next: ({ data }) => [
     {

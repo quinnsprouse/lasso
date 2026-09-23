@@ -15,11 +15,25 @@
     "no-console": "error",
     "prefer-const": "error",
     "unicorn/no-abusive-eslint-disable": "error",
+    "typescript/ban-ts-comment": "error",
     "unicorn/prefer-node-protocol": "error",
     "vitest/no-disabled-tests": "error",
     "vitest/no-focused-tests": "error",
     "vitest/warn-todo": "error",
     "vitest/valid-expect": ["error", { "maxArgs": 2 }],
+    "vitest/no-standalone-expect": [
+      "error",
+      {
+        "additionalTestBlockFunctions": [
+          "it.effect",
+          "it.live",
+          "it.scoped",
+          "it.scopedLive",
+          "it.effect.each",
+          "it.live.each"
+        ]
+      }
+    ],
     "vitest/valid-title": "off",
     "vitest/no-conditional-expect": "off",
     "no-restricted-properties": [
@@ -231,7 +245,8 @@
         "effecttsgo/strict-effect-provide": "off",
         "effecttsgo/async-function": "off",
         "effecttsgo/unsafe-effect-type-assertion": "off",
-        "effecttsgo/any-unknown-in-error-context": "off"
+        "effecttsgo/any-unknown-in-error-context": "off",
+        "effecttsgo/schema-sync": "off"
       }
     },
     {
@@ -239,6 +254,18 @@
       "rules": {
         "no-restricted-properties": [
           "error",
+          {
+            "property": "skip",
+            "message": "Fix or delete the test; a skipped test hides a red suite (covers it.effect.skip)."
+          },
+          {
+            "property": "only",
+            "message": "A focused test hides the rest of the suite (covers it.effect.only)."
+          },
+          {
+            "property": "todo",
+            "message": "Write the test or leave it out; a todo reads as coverage."
+          },
           {
             "property": "skipIf",
             "message": "Tests must run in every supported environment."
@@ -252,5 +279,8 @@
     }
   ],
   "ignorePatterns": ["dist/**", "coverage/**", ".lasso/**"],
-  "extends": ["./node_modules/@effect/tsgo/oxlint-presets/recommended.json"]
+  "extends": [
+    "./node_modules/@effect/tsgo/oxlint-presets/recommended.json",
+    "./node_modules/@effect/tsgo/oxlint-presets/correctness.json"
+  ]
 }

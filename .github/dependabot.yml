@@ -1,6 +1,9 @@
 # The lockstep policy, made mechanical. Two groups may never move alone:
-# the Effect runtime pair (exact-pinned beta), and the type-aware toolchain
-# quartet whose patch mechanism requires matching versions.
+# the Effect packages (exact-pinned release candidate, test helper included),
+# and the type-aware toolchain quartet. `effect-tsgo patch` ships binaries for
+# specific oxlint and oxlint-tsgolint versions: a toolchain PR whose `npm ci`
+# fails in `prepare` names a version @effect/tsgo does not support yet, so
+# wait for the @effect/tsgo release that adds it.
 version: 2
 updates:
   - package-ecosystem: npm
@@ -12,6 +15,7 @@ updates:
         patterns:
           - effect
           - "@effect/platform-node"
+          - "@effect/vitest"
       toolchain-lockstep:
         patterns:
           - "@effect/tsgo"
@@ -24,6 +28,7 @@ updates:
         exclude-patterns:
           - effect
           - "@effect/platform-node"
+          - "@effect/vitest"
           - "@effect/tsgo"
           - typescript
           - oxlint

@@ -1,20 +1,27 @@
 #!/usr/bin/env node
-// Command generator: scaffolds a query contract and registers it in the
-// roster. Usage: node scripts/new-command.mjs <group> <name>   (or just <name>)
+// Command generator: scaffolds a query (default) or a mutation (--mutation)
+// contract and registers it in the roster. A mutation also gets its required
+// plan fixture in test/fixtures/mutations.ts.
+// Usage: node scripts/new-command.mjs <group> <name> [--mutation]   (or just <name>)
 // The result compiles and passes the Fast profile immediately; replace the
-// handler body with real logic.
+// handler (or plan and apply) with real logic.
 //
 // Every check runs before the first write, and every write (module, roster
-// entry, formatting, surface snapshot) is one transaction that rolls back on
-// failure, so the generator never leaves the tree half-edited.
+// entry, fixture, formatting, surface snapshot) is one transaction that rolls
+// back on failure, so the generator never leaves the tree half-edited.
 import { execFileSync } from "node:child_process"
 import { existsSync, readFileSync, rmSync, writeFileSync } from "node:fs"
 import { join, relative } from "node:path"
 import { assertWorkspace, requireToolchain, execTool, repoRoot } from "./lib/toolchain.mjs"
 
-const [groupArg, nameArg] = process.argv.slice(2)
-if (groupArg === undefined) {
-  process.stderr.write("usage: node scripts/new-command.mjs <group> <name> | <name>\n")
+const USAGE =
+  "usage: node scripts/new-command.mjs <group> <name> [--mutation] | <name> [--mutation]\n"
+const argv = process.argv.slice(2)
+const mutation = argv.includes("--mutation")
+const positional = argv.filter((arg) => arg !== "--mutation")
+const [groupArg, nameArg] = positional
+if (groupArg === undefined || positional.length > 2 || positional.some((a) => a.startsWith("-"))) {
+  process.stderr.write(USAGE)
   process.exit(64)
 }
 const parts = nameArg === undefined ? [groupArg] : [groupArg, nameArg]
@@ -36,20 +43,25 @@ const RESERVED = new Set(
 const commandName = parts.join(" ")
 const fileBase = parts.join("-")
 const exportName = fileBase.replace(/-([a-z0-9])/g, (_, c) => c.toUpperCase())
+const typeName = `${exportName[0].toUpperCase()}${exportName.slice(1)}`
 
 assertWorkspace()
 requireToolchain()
 const file = join(repoRoot, "src", "commands", `${fileBase}.ts`)
 const indexFile = join(repoRoot, "src", "commands", "index.ts")
+const fixturesFile = join(repoRoot, "test", "fixtures", "mutations.ts")
 const relFile = relative(repoRoot, file)
 const relIndex = relative(repoRoot, indexFile)
+const relFixtures = relative(repoRoot, fixturesFile)
 
 if (RESERVED.has(exportName)) {
   process.stderr.write(`"${exportName}" is a reserved word — pick another name\n`)
   process.exit(64)
 }
 // The scaffold's summary must satisfy the invariant (≤ 88 characters) as generated.
-const summary = `Describe what ${commandName} returns`
+const summary = mutation
+  ? `Describe what ${commandName} changes`
+  : `Describe what ${commandName} returns`
 if (summary.length > 88) {
   process.stderr.write(
     `"${commandName}" is too long: the generated summary would exceed 88 characters\n`,
@@ -82,21 +94,58 @@ if (existsSync(file)) {
 
 const binName = Object.keys(JSON.parse(readFileSync(join(repoRoot, "package.json"), "utf8")).bin)[0]
 
-const index = readFileSync(indexFile, "utf8")
-for (const marker of ["// generator:imports", "  // generator:contracts"]) {
-  if (!index.includes(marker)) {
-    process.stderr.write(`marker "${marker.trim()}" missing from ${relIndex} — cannot register\n`)
-    process.exit(78)
+const requireMarkers = (text, markers, rel) => {
+  for (const marker of markers) {
+    if (!text.includes(marker)) {
+      process.stderr.write(`marker "${marker.trim()}" missing from ${rel} — cannot register\n`)
+      process.exit(78)
+    }
   }
 }
-// Registered means an import line or a roster entry — not a mention in a comment.
-const registered = new RegExp(`^import \\{ ${exportName} \\}|^\\s+${exportName},$`, "m")
-if (registered.test(index)) {
-  process.stderr.write(`"${exportName}" is already registered in ${relIndex}\n`)
+
+/** Names bound at the top level of a module: imports and declarations. */
+const boundNames = (source) => {
+  const names = new Set()
+  for (const [, specifiers] of source.matchAll(/^import\s+(?:type\s+)?\{([^}]*)\}/gm)) {
+    for (const specifier of specifiers.split(",")) {
+      const local = specifier
+        .trim()
+        .replace(/^type\s+/, "")
+        .split(/\s+as\s+/)
+        .at(-1)
+      if (local) names.add(local)
+    }
+  }
+  const declaration =
+    /^(?:import\s+(?:\*\s+as\s+)?|(?:export\s+)?(?:const|let|var|function|class|type|interface)\s+)([A-Za-z_$][\w$]*)/gm
+  for (const [, name] of source.matchAll(declaration)) {
+    if (name !== "type") names.add(name)
+  }
+  return names
+}
+
+const index = readFileSync(indexFile, "utf8")
+requireMarkers(index, ["// generator:imports", "  // generator:contracts"], relIndex)
+const fixtures = mutation ? readFileSync(fixturesFile, "utf8") : undefined
+if (fixtures !== undefined) {
+  requireMarkers(fixtures, ["// generator:imports", "  // generator:fixtures"], relFixtures)
+}
+// The new export is imported into each file the generator edits, next to the
+// scaffold's own imports: every one of those names must be free.
+const taken = [
+  [
+    "the scaffold",
+    new Set(["Effect", "Schema", "defineQuery", "defineMutation", `${typeName}Plan`]),
+  ],
+  [relIndex, boundNames(index)],
+  ...(fixtures !== undefined ? [[relFixtures, boundNames(fixtures)]] : []),
+].find(([, names]) => names.has(exportName))
+if (taken !== undefined) {
+  process.stderr.write(`"${exportName}" is already bound in ${taken[0]} — pick another name\n`)
   process.exit(73)
 }
 
-const source = `import { Effect, Schema } from "effect"
+const querySource = `import { Effect, Schema } from "effect"
 import { defineQuery } from "../contract/contract.ts"
 
 export const ${exportName} = defineQuery({
@@ -118,26 +167,97 @@ export const ${exportName} = defineQuery({
 })
 `
 
-const updated = index
+const mutationSource = `import { Effect, Schema } from "effect"
+import { defineMutation } from "../contract/contract.ts"
+
+// The plan is the whole intent: the runtime encodes it, hashes it into the
+// confirmation token, and hands apply its decoded form. Keep it deterministic
+// (no timestamps or random ids; assign those in apply) and self-contained.
+const ${typeName}Plan = Schema.Struct({
+  changes: Schema.Array(Schema.String),
+})
+
+export const ${exportName} = defineMutation({
+  name: "${commandName}",
+  summary: "${summary}",
+  stability: "experimental",
+  // Revisit: "always" means re-applying the same plan is safe.
+  idempotency: { kind: "always" },
+  params: {},
+  planSchema: ${typeName}Plan,
+  dataSchema: Schema.Struct({ applied: Schema.Int }),
+  domainErrorCodes: [],
+  examples: [
+    {
+      command: "${binName} ${commandName} --dry-run --json",
+      description: "Preview the plan without changing anything",
+    },
+    {
+      command: "${binName} ${commandName} --yes --json",
+      description: "Apply in one non-interactive step",
+    },
+  ],
+  // plan gets read services (PlanServices), apply gets write services
+  // (ApplyServices). Use Effect.fn("${exportName}.plan")(function* (input) { … })
+  // once either needs services, and update the fixture in ${relFixtures}.
+  plan: () => Effect.succeed({ changes: [] }),
+  apply: (plan) => Effect.succeed({ applied: plan.changes.length }),
+  renderPlanText: (plan) => \`Will apply \${plan.changes.length} change(s)\`,
+  renderText: (data) => \`Applied \${data.applied} change(s)\`,
+})
+`
+
+const updatedIndex = index
   .replace(
     "// generator:imports",
     `import { ${exportName} } from "./${fileBase}.ts"\n// generator:imports`,
   )
   .replace("  // generator:contracts", `  ${exportName},\n  // generator:contracts`)
 
+const updatedFixtures = fixtures
+  ?.replace(
+    "// generator:imports",
+    `import { ${exportName} } from "../../src/commands/${fileBase}.ts"\n// generator:imports`,
+  )
+  .replace(
+    "  // generator:fixtures",
+    `  planFixture(${exportName}, {
+    name: "${commandName} plans its changes",
+    input: {},
+    expected: { plan: { changes: [] } },
+  }),
+  // generator:fixtures`,
+  )
+
 // All checks passed. Every write below is one transaction: the new module,
-// the roster entry, formatting, and the surface snapshot (a new command is an
-// additive surface change). Any failure rolls every file back.
+// the roster entry, the fixture, formatting, and the surface snapshot (a new
+// command is an additive surface change). Any failure rolls every file back.
 const snapshotFile = join(repoRoot, "test", "contract", "surface.snapshot.json")
 const snapshotBefore = existsSync(snapshotFile) ? readFileSync(snapshotFile, "utf8") : undefined
 let wroteFile = false
 let wroteIndex = false
+let wroteFixtures = false
+// With a listener, Node delivers a signal only after this synchronous
+// transaction has committed or rolled back; then the run exits 130.
+for (const signal of ["SIGINT", "SIGTERM"]) {
+  process.on(signal, () => {
+    process.exitCode = 130
+  })
+}
 try {
-  writeFileSync(file, source)
+  writeFileSync(file, mutation ? mutationSource : querySource)
   wroteFile = true
-  writeFileSync(indexFile, updated)
+  writeFileSync(indexFile, updatedIndex)
   wroteIndex = true
-  execTool("biome", ["format", "--write", relFile, relIndex], { stdio: "pipe" })
+  if (updatedFixtures !== undefined) {
+    writeFileSync(fixturesFile, updatedFixtures)
+    wroteFixtures = true
+  }
+  execTool(
+    "biome",
+    ["format", "--write", relFile, relIndex, ...(wroteFixtures ? [relFixtures] : [])],
+    { stdio: "pipe" },
+  )
   execFileSync(process.execPath, [join(repoRoot, "scripts", "surface-snapshot.mjs")], {
     cwd: repoRoot,
     stdio: "pipe",
@@ -145,15 +265,28 @@ try {
 } catch (error) {
   if (wroteFile) rmSync(file, { force: true })
   if (wroteIndex) writeFileSync(indexFile, index)
+  if (wroteFixtures) writeFileSync(fixturesFile, fixtures)
   if (snapshotBefore !== undefined) writeFileSync(snapshotFile, snapshotBefore)
   process.stderr.write(
-    `generation failed; rolled back ${relFile}, ${relIndex}, and the surface snapshot\n`,
+    `generation failed; rolled back ${[relFile, relIndex, ...(mutation ? [relFixtures] : [])].join(", ")}, and the surface snapshot\n`,
   )
   process.stderr.write(`${error.stdout ?? ""}${error.stderr ?? ""}${error.message}\n`)
   process.exit(70)
 }
 
+const created = mutation ? `${relFile} and its plan fixture` : relFile
 process.stderr.write(
-  `created ${relFile}, registered "${commandName}", and recorded it in the surface snapshot\n`,
+  `created ${created}, registered "${commandName}", and recorded it in the surface snapshot\n`,
 )
-process.stderr.write(`next: implement the handler, then run: npm run check\n`)
+process.stderr.write(
+  mutation
+    ? [
+        "next: implement plan (read services) and apply (write services), then",
+        `  1. update the fixture in ${relFixtures}; add cases for each plan branch and expected error`,
+        "  2. add a unit test through fake layers (pattern: test/unit/task-create.test.ts)",
+        "  3. add a happy-path and a failure e2e case in test/e2e/cli.test.ts",
+        "  4. run: npm run surface:update && npm run check",
+        "",
+      ].join("\n")
+    : "next: implement the handler, then run: npm run check\n",
+)

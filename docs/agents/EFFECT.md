@@ -1,6 +1,6 @@
 # Effect patterns
 
-Use the docs shipped with the pinned Effect v4 beta. Read `node_modules/effect/AGENTS.md` first, then the relevant examples in `node_modules/effect/ai-docs/src/`. Upgrade `effect` and `@effect/platform-node` together, using exact versions.
+Use the docs shipped with the pinned Effect v4 release candidate. Read `node_modules/effect/AGENTS.md` first, then the relevant examples in `node_modules/effect/ai-docs/src/`. Upgrade `effect`, `@effect/platform-node`, and `@effect/vitest` together, using exact versions; `npm run doctor` fails when they drift apart. After an upgrade, `npm run check` and the surface snapshot diff show what changed: a parser or JSON Schema change surfaces there before it reaches a consumer.
 
 ## Patterns to copy
 
@@ -9,14 +9,15 @@ Use the docs shipped with the pinned Effect v4 beta. Read `node_modules/effect/A
 - Decode untrusted values with Schema before using them. Reuse decoder functions, and use `Schema.decodeUnknownEffect` inside Effect code. Map validation failures to an expected error when callers can recover.
 - Wrap external promises with `Effect.tryPromise({ try, catch })`. Map the rejection to a typed error.
 - Recover by tag with `Effect.catchTag`, or by a platform error's reason with `Effect.catchReason`. Do not swallow unrelated failures with `Effect.catch`.
-- Bound retries by count or elapsed time and retry only recoverable failures. The store retries `error.reason._tag === "AlreadyExists"` for lock contention, but fails immediately on permission errors.
-- Use `Effect.acquireRelease` inside `Effect.scoped`, or `Effect.acquireUseRelease` for a single guarded operation. Both release resources on interruption.
+- Bound retries by count or elapsed time and retry only recoverable failures. The store retries `error.reason._tag === "AlreadyExists"` for lock contention, but fails immediately on permission errors. Keep `transient` truthful: when a retry cannot succeed (the store reports a lock older than any live holder as `cannot_write`), use a non-transient code whose `fix` says how to clear it.
+- Use `Effect.acquireRelease` inside `Effect.scoped`, or `Effect.acquireUseRelease` for a single guarded operation. Both release resources on interruption. `acquire` itself runs uninterruptibly, so keep it to one attempt and retry around the whole operation; waiting inside `acquire` makes Ctrl-C and SIGTERM wait too (see `StoreWriter.modify`).
 - Define services with `Context.Service` and provide layers at the application boundary. Tests replace them with `Layer.succeed(Service, Service.of({ … }))`.
-- Use `Clock.currentTimeMillis` and `DateTime` for time. Keep time-dependent metadata out of mutation plans so confirmation tokens remain stable.
+- Use `DateTime.now` (backed by `Clock`, so tests control it) for timestamps. Keep time-dependent metadata out of mutation plans so confirmation tokens remain stable.
+- Guard unknown values with `Predicate` (`isObjectKeyword`, `hasProperty`) instead of hand-written `typeof` and `in` checks.
 
 ## Enforced boundaries
 
-`.oxlintrc.json` extends the recommended `@effect/tsgo` preset. `npm run prepare` patches Oxlint; `npm run lint` runs its type-aware rules and fails on warnings. The doctor checks that a deliberately floating Effect triggers a diagnostic.
+`.oxlintrc.json` extends the `recommended` and `correctness` `@effect/tsgo` presets. `npm run prepare` patches Oxlint; `npm run lint` runs its type-aware rules and fails on warnings. The doctor checks that a deliberately floating Effect triggers a diagnostic.
 
 Effect recommends [reporting these diagnostics through Oxlint](https://github.com/Effect-TS/tsgo/blob/main/docs/README.md). There is no separate diagnostics command. The post-edit hook runs the same lint rules, with full project typechecking available through `LASSO_POST_EDIT_FULL=1`.
 

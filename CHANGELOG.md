@@ -2,6 +2,18 @@
 
 The machine surface is additive-only. Each entry names a user-visible change; a breaking change names the `schemaVersion` bump and the migration. The repository's `test/contract/surface.snapshot.json` records the exact surface at every tag.
 
+## Unreleased
+
+- `interrupted` now also ends a run stopped by SIGTERM (what agent harnesses and CI send on a timeout), with the same terminal envelope or event as SIGINT; a second signal exits at once.
+- Exactly one terminal outcome, always: a signal that lands while the terminal envelope is being written no longer adds an `interrupted` envelope after it, and a closed stdout keeps the outcome's exit code (a confirmation stays 4). A run that can never finish ends as `internal_error`, exit 70, instead of exiting 0 silently.
+- A mistyped command or flag offers the corrected invocation as the first `next` move when it parses (`did you mean "list"?`); a guessed mutation previews rather than applies. The parser no longer prints a second copy of usage errors on stderr.
+- A flag given twice is a usage error, including `--yes --no-yes` (which used to apply). A `--confirm` value that is not a token is `invalid_usage`.
+- Under `--confirm`, only a data change (`resource_conflict`, `not_found`, `invalid_data`) reports as `stale_confirmation`; an unreadable store or an outage keeps its own code, exit, and `fix`.
+- Text mode: parser output honors `TERM=dumb` and `CI`, and logs go to stderr in every format. An empty `LASSO_FORMAT` counts as unset; `--format auto` defers to a concrete format.
+- Mutations: `apply` receives the plan decoded from the exact JSON the token hashed.
+- Demo: `task create` plans record `ifExists`, so `--if-not-exists` stays a no-op when another writer wins the race; ids normalize Unicode (NFC) and never end in `-` after truncation.
+- Demo store: a lock left behind by a killed process now fails as non-transient `cannot_write`, with the removal command in `fix`, instead of a `transient_failure` that no retry could clear. A writer waiting on a held lock can be interrupted. Fields this version does not know are rejected as `invalid_config` instead of dropped on the next write; unreadable stores report `invalid_config`, not `cannot_write`; a failed write leaves no temp file.
+
 ## 0.1.0
 
 Initial release.

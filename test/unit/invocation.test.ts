@@ -75,7 +75,11 @@ describe("validateInvocation", () => {
     ["task", "list", "--json", "--format", "text"],
     ["task", "list", "--wizard"],
     ["task", "create", "x", "--dry-run", "--yes"],
-    ["task", "create", "x", "--confirm", "token", "--yes"],
+    ["task", "create", "x", "--confirm", "plan_0123456789abcdef", "--yes"],
+    ["task", "create", "x", "--confirm", "token"],
+    ["task", "create", "x", "--confirm="],
+    ["task", "create", "x", "--yes", "--no-yes"],
+    ["task", "create", "x", "--dry-run", "--dry-run=false"],
     ["task", "create", "--dry-run", "--no-if-not-exists", "true"],
     ["task", "list", "--help", "--bogus"],
   ])("rejects %j", async (...args) => {
@@ -112,7 +116,7 @@ it("validation never executes query, plan, or apply handlers", async () => {
     [
       ["probe", "read"],
       ["probe", "write", "--yes"],
-      ["probe", "write", "--confirm", "token"],
+      ["probe", "write", "--confirm", "plan_0123456789abcdef"],
       ["probe", "write", "--dry-run"],
       ["probe", "write", "--help"],
       ["--version"],

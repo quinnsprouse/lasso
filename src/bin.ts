@@ -1,15 +1,16 @@
 import { NodeServices } from "@effect/platform-node"
 import { Effect, Fiber, Layer } from "effect"
 import type { Exit } from "effect"
-import { machineOutputLayer, runCli } from "./contract/adapter.ts"
+import { outputLayer, runCli } from "./contract/adapter.ts"
 import { surfaceOf } from "./contract/surface.ts"
 import { describeCli } from "./contract/jsonschema.ts"
 import { ExitCode } from "./output/exit.ts"
 import { FormatNegotiationError, negotiate } from "./output/format.ts"
+import { DISCOVER } from "./output/guidance.ts"
 import type { OutputMode } from "./output/format.ts"
 import type { Outcome, Write } from "./output/outcome.ts"
 import { renderOutcome } from "./output/outcome.ts"
-import { Renderer } from "./output/renderer.ts"
+import { Renderer, TerminalLatch } from "./output/renderer.ts"
 import { settleExit } from "./runtime.ts"
 import { appServicesLayer } from "./services/index.ts"
 import { CLI_NAME, CLI_SUMMARY, CLI_VERSION } from "./meta.ts"
@@ -64,17 +65,19 @@ const main = async (): Promise<number> => {
         message: error.message,
         fix: error.fix,
         transient: false,
-        next: [{ message: "list every command and flag", args: ["describe", "--json"] }],
+        next: [DISCOVER],
       })
       return ExitCode.usage
     }
     throw error
   }
 
-  const baseLayer = appServicesLayer.pipe(Layer.provideMerge(Renderer.layer(mode, CLI_NAME)))
-  const appLayer = (
-    mode.format === "text" ? baseLayer : machineOutputLayer.pipe(Layer.provideMerge(baseLayer))
-  ).pipe(Layer.provideMerge(NodeServices.layer))
+  const terminal = new TerminalLatch()
+  const appLayer = outputLayer(mode).pipe(
+    Layer.provideMerge(appServicesLayer),
+    Layer.provideMerge(Renderer.layer(mode, CLI_NAME, terminal)),
+    Layer.provideMerge(NodeServices.layer),
+  )
   const program = runCli({
     binName: CLI_NAME,
     summary: CLI_SUMMARY,
@@ -82,18 +85,52 @@ const main = async (): Promise<number> => {
     contracts,
   }).pipe(Effect.provide(appLayer))
 
-  // SIGINT interrupts the fiber so Effect finalizers (like the store lock
-  // release) run before the process exits — and writes nothing to stdout.
+  // SIGINT (Ctrl-C) and SIGTERM (what agent harnesses and CI send on a
+  // timeout) interrupt the fiber so Effect finalizers, like the store lock
+  // release, run before exit; the run settles as `interrupted`. A second
+  // signal means the caller stopped waiting for cleanup.
   const fiber = Effect.runFork(program)
-  process.on("SIGINT", () => {
+  let signalled = false
+  const onSignal = () => {
+    if (signalled) {
+      process.exit(ExitCode.interrupted)
+    }
+    signalled = true
     Effect.runFork(Fiber.interrupt(fiber))
-  })
+  }
+  process.on("SIGINT", onSignal)
+  process.on("SIGTERM", onSignal)
+  // When every fiber waits on something nothing can complete, Node's event
+  // loop drains and the process would exit 0 with no output. Settle it as the
+  // defect it is: the one terminal envelope, exit 70.
+  const onStall = () => {
+    if (terminal.kind !== undefined) {
+      // The outcome is already out; only a detached fiber is left waiting.
+      process.exitCode = terminal.kind === "confirmation" ? ExitCode.confirmationRequired : 0
+      return
+    }
+    render(mode, {
+      kind: "failure",
+      code: "internal_error",
+      message: "the command stopped making progress: it is waiting on work that can never finish",
+      fix: "this is a bug in the CLI, not in the invocation; report the command you ran",
+      transient: false,
+    })
+    process.exitCode = ExitCode.internalDefect
+  }
+  process.once("beforeExit", onStall)
   const exit: Exit.Exit<void, unknown> = await Effect.runPromise(Fiber.await(fiber))
+  process.removeListener("beforeExit", onStall)
 
   const settled = await Effect.runPromise(
-    settleExit({ exit, mode, binName: CLI_NAME, describeData, surfaces }).pipe(
-      Effect.provide(NodeServices.layer),
-    ),
+    settleExit({
+      exit,
+      mode,
+      binName: CLI_NAME,
+      describeData,
+      surfaces,
+      written: terminal.kind,
+    }).pipe(Effect.provide(NodeServices.layer)),
   )
   write(settled.writes)
   return settled.code

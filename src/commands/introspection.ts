@@ -8,7 +8,10 @@ import { CLI_NAME, CLI_VERSION } from "../meta.ts"
 // Read the roster lazily so describe/schema can include their own definitions.
 export const makeIntrospection = (
   roster: () => ReadonlyArray<AnyContract>,
-): { describe: QueryContract<any, any>; schema: QueryContract<any, any> } => ({
+): {
+  describe: QueryContract<any, any, never, any>
+  schema: QueryContract<any, any, never, any>
+} => ({
   describe: defineQuery({
     name: "describe",
     summary: "Describe every command, capability, guide, and protocol detail as JSON",

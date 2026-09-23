@@ -1,7 +1,7 @@
 import { mutationFixtures } from "../fixtures/mutations.ts"
 import { readFileSync } from "node:fs"
 import { join } from "node:path"
-import { describe, expect, it } from "vitest"
+import { describe, expect, it } from "@effect/vitest"
 import { contracts } from "../../src/commands/index.ts"
 import type { ParamSpec } from "../../src/contract/contract.ts"
 import { commandSchemas, describeCli, schemaDocument } from "../../src/contract/jsonschema.ts"
@@ -294,7 +294,5 @@ describe("mutation plan fixtures", () => {
     for (const fixture of mutationFixtures) expect(mutations).toContain(fixture.contract)
   })
 
-  it.each(mutationFixtures)("$contract.name: $name", async (fixture) => {
-    await fixture.expectPlan()
-  })
+  it.effect.each(mutationFixtures)("$contract.name: $name", (fixture) => fixture.expectPlan())
 })

@@ -2,7 +2,7 @@ import { NodeServices } from "@effect/platform-node"
 import { Effect } from "effect"
 import type { Exit } from "effect"
 import { describe, expect, it } from "vitest"
-import { ExitSignal } from "../../src/contract/adapter.ts"
+import { ExitSignal } from "../../src/contract/execute.ts"
 import { AppError, Errors } from "../../src/errors.ts"
 import type { OutputMode } from "../../src/output/format.ts"
 import { settleExit } from "../../src/runtime.ts"
@@ -24,7 +24,11 @@ const mode = (format: OutputMode["format"]): OutputMode => ({
 const exitOf = (effect: Effect.Effect<void, unknown>): Promise<Exit.Exit<void, unknown>> =>
   Effect.runPromiseExit(effect)
 
-const settle = async (effect: Effect.Effect<void, unknown>, format: OutputMode["format"]) =>
+const settle = async (
+  effect: Effect.Effect<void, unknown>,
+  format: OutputMode["format"],
+  written?: "ok" | "confirmation",
+) =>
   Effect.runPromise(
     settleExit({
       exit: await exitOf(effect),
@@ -32,8 +36,33 @@ const settle = async (effect: Effect.Effect<void, unknown>, format: OutputMode["
       binName: "lasso",
       describeData: () => ({ marker: true }),
       surfaces: [],
+      written,
     }).pipe(Effect.provide(NodeServices.layer)),
   )
+
+describe("after the Renderer wrote the terminal outcome", () => {
+  it("an interrupt that lands during or after the write adds nothing and keeps its code", async () => {
+    expect(await settle(Effect.interrupt, "json", "ok")).toEqual({ writes: [], code: 0 })
+    expect(await settle(Effect.interrupt, "ndjson", "confirmation")).toEqual({
+      writes: [],
+      code: 4,
+    })
+  })
+
+  it("a consumer that closed stdout does not turn a confirmation into success", async () => {
+    const epipe = Object.assign(new Error("write EPIPE"), { code: "EPIPE" })
+    expect(await settle(Effect.die(epipe), "json", "confirmation")).toEqual({
+      writes: [],
+      code: 4,
+    })
+  })
+
+  it("any other defect is reported on stderr only, never as a second envelope", async () => {
+    const settled = await settle(Effect.die(new Error("late bug")), "json", "ok")
+    expect(settled.code).toBe(70)
+    expect(settled.writes.every((write) => write.stream === "stderr")).toBe(true)
+  })
+})
 
 describe("settleExit", () => {
   it("success writes nothing and exits 0", async () => {
@@ -131,6 +160,7 @@ describe("an interrupted command", () => {
         binName: "lasso",
         describeData: () => ({}),
         surfaces: contracts.map(surfaceOf),
+        written: undefined,
       }).pipe(Effect.provide(NodeServices.layer)),
     )
     const envelope = JSON.parse(settled.writes.at(-1)!.text)

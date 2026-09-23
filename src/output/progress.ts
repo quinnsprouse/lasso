@@ -17,7 +17,7 @@ export class Progress extends Context.Service<Progress, ProgressApi>()("lasso/ou
     Progress,
     Effect.gen(function* () {
       const renderer = yield* Renderer
-      return Progress.of({ report: (update) => renderer.progress(update).pipe(Effect.orDie) })
+      return Progress.of({ report: (update) => renderer.progress(update) })
     }),
   )
 }

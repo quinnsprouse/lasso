@@ -100,6 +100,23 @@ describe("store", () => {
     expect(error.code).toBe("invalid_config")
   })
 
+  it("rejects fields this version does not know instead of dropping them on the next write", async () => {
+    const { mkdir, writeFile } = await import("node:fs/promises")
+    await mkdir(join(dir, ".lasso"), { recursive: true })
+    const task = { id: "task_a", title: "A", status: "open", createdAt: "x", priority: 5 }
+    await writeFile(join(dir, ".lasso", "tasks.json"), JSON.stringify({ tasks: [task] }))
+    const error = await Effect.runPromise(load.pipe(Effect.flip))
+    expect(error.code).toBe("invalid_config")
+  })
+
+  it("a .lasso that is not a directory is a misconfiguration with a structural fix", async () => {
+    const { writeFile } = await import("node:fs/promises")
+    await writeFile(join(dir, ".lasso"), "not a directory")
+    const error = await Effect.runPromise(load.pipe(Effect.flip))
+    expect(error.code).toBe("invalid_config")
+    expect(error.fix).toContain("must be a directory")
+  })
+
   it("releases the lock even when the transform throws through encode", async () => {
     // A task that fails schema encoding: title must be non-empty.
     const invalid = { id: "task_x", title: "", status: "open", createdAt: "x" } as unknown as Task
@@ -133,7 +150,30 @@ describe("store concurrency and no-ops", () => {
     const error = await Effect.runPromise(modify(() => [seed("task_a")]).pipe(Effect.flip))
     expect(error.code).toBe("transient_failure")
     expect(error.transient).toBe(true)
-    expect(error.fix).toContain("tasks.lock")
+  })
+
+  it("a writer queued behind another stays interruptible (Ctrl-C, SIGTERM)", async () => {
+    const { mkdir } = await import("node:fs/promises")
+    await mkdir(join(dir, ".lasso", "tasks.lock"), { recursive: true })
+    const started = Date.now()
+    const exit = await Effect.runPromiseExit(
+      modify(() => [seed("task_a")]).pipe(Effect.timeout("100 millis")),
+    )
+    expect(exit._tag).toBe("Failure")
+    // The contention window is about a second; interruption must not wait it out.
+    expect(Date.now() - started).toBeLessThan(600)
+  })
+
+  it("a lock abandoned by a killed process is not transient: retrying cannot clear it", async () => {
+    const { mkdir, utimes } = await import("node:fs/promises")
+    const lock = join(dir, ".lasso", "tasks.lock")
+    await mkdir(lock, { recursive: true })
+    const minuteAgo = new Date(Date.now() - 60_000)
+    await utimes(lock, minuteAgo, minuteAgo)
+    const error = await Effect.runPromise(modify(() => [seed("task_a")]).pipe(Effect.flip))
+    expect(error.code).toBe("cannot_write")
+    expect(error.transient).toBe(false)
+    expect(error.fix).toContain("rm -r .lasso/tasks.lock")
   })
 
   it("an unwritable state directory fails immediately as cannot_write", async () => {

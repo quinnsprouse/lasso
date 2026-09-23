@@ -17,7 +17,7 @@ import { join } from "node:path"
 import { assertWorkspace, requireToolchain, execTool, repoRoot } from "./lib/toolchain.mjs"
 
 const name = process.argv[2]
-if (name === undefined || !/^[a-z][a-z0-9-]*$/.test(name)) {
+if (name === undefined || !/^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$/.test(name)) {
   process.stderr.write("usage: node scripts/rename.mjs <kebab-case-name>\n")
   process.exit(64)
 }
@@ -86,6 +86,29 @@ const files = (tracked() ?? walk(repoRoot, [])).filter((path) => {
   return stat !== undefined && stat.isFile()
 })
 
+// The template's own coordinates, which the README keeps. Spelled in halves so
+// the word rewrite below never reaches the constant.
+const TEMPLATE = ["quinnsprouse", ["las", "so"].join("")].join("/")
+
+// A name the project already uses as a word would be rewritten by any later
+// rename away from it (`task` would take every `Task` class with it). The
+// current name (`lasso` inside `lasso-renamed`) and the template coordinates
+// are not uses.
+const current = new RegExp(`\\b(${oldName}|${titleCase(oldName)}|${oldPrefix}_)`, "g")
+const uses = [`\\b${name}\\b`, `\\b${titleCase(name)}\\b`, `\\b${newPrefix}_`].map(
+  (pattern) => new RegExp(pattern),
+)
+const inUse = files.filter((file) => {
+  const text = readFileSync(file, "utf8").replaceAll(TEMPLATE, "").replace(current, "")
+  return uses.some((pattern) => pattern.test(text))
+})
+if (inUse.length > 0) {
+  process.stderr.write(
+    `"${name}" already appears as a word in ${inUse.length} file(s), e.g. ${inUse[0].slice(repoRoot.length + 1)}; pick a name the project does not use\n`,
+  )
+  process.exit(64)
+}
+
 let changed = 0
 for (const file of files) {
   const before = readFileSync(file, "utf8")
@@ -121,7 +144,7 @@ if (existsSync(join(repoRoot, "scripts", "guides.mjs"))) {
 const readmePath = join(repoRoot, "README.md")
 if (existsSync(readmePath)) {
   const readme = readFileSync(readmePath, "utf8")
-    .replaceAll(`quinnsprouse/${name}`, `quinnsprouse/${oldName}`)
+    .replaceAll(`quinnsprouse/${name}`, TEMPLATE)
     .replace(/^Rename the package before publishing[^.]*\. /m, "")
   writeFileSync(readmePath, readme)
 }

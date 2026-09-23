@@ -8,6 +8,7 @@ import { validateInvocation } from "../../src/contract/adapter.ts"
 import { surfaceOf } from "../../src/contract/surface.ts"
 import { isGuideTopic } from "../../src/guides/catalog.ts"
 import { CLI_NAME } from "../../src/meta.ts"
+import { argvOf } from "./harness.ts"
 
 /**
  * The shipped skill is layer one of the guidance model: only what an agent
@@ -36,13 +37,6 @@ const invocations = (): ReadonlyArray<string> =>
     .map((match) => match[1]!)
     // Prose placeholders such as `lasso <command> --json` describe the shape, not an invocation.
     .filter((span) => span.startsWith(`${CLI_NAME} `) && !/^\S+ </.test(span))
-
-const argvOf = (span: string): ReadonlyArray<string> =>
-  span
-    .replace(/<[^>]+>/g, "x")
-    .match(/"[^"]*"|\S+/g)!
-    .slice(1)
-    .map((token) => token.replace(/^"|"$/g, ""))
 
 describe("shipped skill", () => {
   it("carries portable frontmatter whose name matches its directory", () => {

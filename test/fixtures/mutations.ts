@@ -3,6 +3,7 @@ import { taskCreate } from "../../src/commands/task-create.ts"
 import { Task } from "../../src/domain/task.ts"
 import { StoreReader } from "../../src/services/store.ts"
 import { planFixture } from "../contract/plan-fixture.ts"
+// generator:imports — scripts/new-command.mjs --mutation inserts above this line
 
 const existing = new Task({
   id: "task_ship",
@@ -20,7 +21,11 @@ export const mutationFixtures = [
     input: { title: "Ship", ifNotExists: false },
     layer: reads([]),
     expected: {
-      plan: { action: "create_task", task: { id: "task_ship", title: "Ship", status: "open" } },
+      plan: {
+        action: "create_task",
+        task: { id: "task_ship", title: "Ship", status: "open" },
+        ifExists: "fail",
+      },
     },
   }),
   planFixture(taskCreate, {
@@ -28,7 +33,11 @@ export const mutationFixtures = [
     input: { title: "Ship", ifNotExists: true },
     layer: reads([]),
     expected: {
-      plan: { action: "create_task", task: { id: "task_ship", title: "Ship", status: "open" } },
+      plan: {
+        action: "create_task",
+        task: { id: "task_ship", title: "Ship", status: "open" },
+        ifExists: "skip",
+      },
     },
   }),
   planFixture(taskCreate, {
@@ -43,4 +52,5 @@ export const mutationFixtures = [
     layer: reads([existing]),
     expected: { error: "resource_conflict" },
   }),
+  // generator:fixtures — scripts/new-command.mjs --mutation inserts above this line
 ]

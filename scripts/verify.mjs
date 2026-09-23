@@ -1,7 +1,11 @@
 #!/usr/bin/env node
 // fast: format, type-aware lint (Effect + Vitest), types, guide catalog, unit + contract tests
-// push: fast + build (with publint), knip, e2e against dist, pack smoke
+// push: fast + build (with publint), knip (incl. import cycles), e2e against dist, pack smoke
 // ci: push + coverage + starter contract
+//
+// Vitest picks its reporter: the compact `agent` reporter under a coding agent
+// (it detects CLAUDECODE, CODEX_*, and similar), its default for people, and
+// GitHub annotations in CI.
 import { spawnSync } from "node:child_process"
 import { repoRoot, requireToolchain, spawnTool } from "./lib/toolchain.mjs"
 
@@ -13,16 +17,23 @@ const profiles = {
     step("typecheck", "tsc", ["--noEmit"]),
     step("guide catalog", "node", ["scripts/guides.mjs", "--check"]),
     // e2e is deliberately excluded here: it depends on dist, which Push builds.
-    step("unit tests", "vitest", ["run", "--reporter=dot", "test/unit", "test/contract"]),
+    step("unit tests", "vitest", ["run", "test/unit", "test/contract"]),
   ],
   push: [
     step("build", "tsdown", []),
-    step("knip", "knip", []),
-    step("e2e", "vitest", ["run", "--reporter=dot", "test/e2e"]),
+    // Every issue type, cycles included (knip leaves cycles out by default).
+    step("knip", "knip", [
+      "--dependencies",
+      "--exports",
+      "--files",
+      "--cycles",
+      "--treat-config-hints-as-errors",
+    ]),
+    step("e2e", "vitest", ["run", "test/e2e"]),
     step("pack smoke", "node", ["scripts/pack-smoke.mjs"]),
   ],
   ci: [
-    step("coverage", "vitest", ["run", "--coverage", "--reporter=dot"]),
+    step("coverage", "vitest", ["run", "--coverage"]),
     step("starter contract", "node", ["scripts/starter-contract.mjs"]),
   ],
 }

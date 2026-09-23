@@ -1,5 +1,5 @@
 import { spawnSync } from "node:child_process"
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs"
+import { mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs"
 import { join } from "node:path"
 import { expect, it } from "vitest"
 const repoRoot = join(import.meta.dirname, "..", "..")
@@ -84,4 +84,25 @@ it("rejects forbidden runtime access, including aliases, while accepting compose
   } finally {
     rmSync(dir, { recursive: true, force: true })
   }
+})
+
+it("every lint suppression states its reason after --", () => {
+  // Suppressing to get green is the easiest way around a rule; a stated reason
+  // makes every exception reviewable. @ts-expect-error descriptions are
+  // enforced by typescript/ban-ts-comment, biome-ignore by Biome's own syntax.
+  const directive = /\/[/*]\s*(?:oxlint|eslint)-disable(?:-next-line|-line)?\b(.*)$/
+  const files = ["src", "scripts", "test", ".claude/hooks", "bin"].flatMap((dir) =>
+    readdirSync(join(repoRoot, dir), { recursive: true, encoding: "utf8" })
+      .filter((file) => /\.(ts|mjs|cjs)$/.test(file))
+      .map((file) => join(dir, file)),
+  )
+  const unexplained = files.flatMap((file) =>
+    readFileSync(join(repoRoot, file), "utf8")
+      .split("\n")
+      .flatMap((line, index) => {
+        const match = directive.exec(line)
+        return match !== null && !/\s--\s+\S.{2,}/.test(match[1]!) ? [`${file}:${index + 1}`] : []
+      }),
+  )
+  expect(unexplained, "add `-- <reason>` after each directive, or fix the code").toEqual([])
 })

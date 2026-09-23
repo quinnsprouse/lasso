@@ -9,7 +9,7 @@ import { taskList } from "./task-list.ts"
 
 // Enforce read/write capabilities at registration. Add services in src/services/index.ts.
 export type RosterContract =
-  | QueryContract<any, any, QueryServices>
+  | QueryContract<any, any, QueryServices, any>
   | MutationContract<any, any, any, PlanServices, ApplyServices>
 
 const introspection = makeIntrospection(() => contracts)
