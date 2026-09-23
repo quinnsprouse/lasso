@@ -2,7 +2,7 @@
 // Accident prevention for direct commands and generated-file edits.
 // Shell programs are outside this hook's scope. Git hooks and CI run the checks.
 import { readFileSync } from "node:fs"
-import { basename, relative, resolve } from "node:path"
+import { basename, relative, resolve, sep } from "node:path"
 import { repoRoot, workspaceFrom } from "../../scripts/lib/toolchain.mjs"
 
 let input
@@ -12,6 +12,12 @@ try {
   process.exit(0)
 }
 const root = workspaceFrom(input?.cwd) ?? repoRoot
+// Where a relative path in the command resolves: the shell's cwd, not the root.
+const cwd = typeof input?.cwd === "string" ? input.cwd : root
+// macOS and Windows file systems ignore case: `.GIT` is `.git` there.
+const fold = ["darwin", "win32"].includes(process.platform)
+  ? (path) => path.toLowerCase()
+  : (path) => path
 const deny = (reason, fix) => {
   process.stderr.write(`guard: ${reason}\nfix: ${fix}\n`)
   process.exit(2)
@@ -53,7 +59,14 @@ const directArgs = (command) => {
 /** The branch a refspec updates: the part after ":" or the whole spec. */
 const destination = (spec) =>
   basename(spec.includes(":") ? spec.slice(spec.indexOf(":") + 1) : spec)
-const isMain = (ref) => ["main", "master"].includes(basename(ref))
+// A glob destination (`refs/heads/*`) matches main too.
+const isMain = (ref) => ref.includes("*") || ["main", "master"].includes(basename(ref))
+
+/** git accepts any unambiguous prefix of a long option: `--no-veri` is `--no-verify`. */
+const spells = (arg, option, shortest) => {
+  const name = arg.split("=")[0]
+  return name.length >= shortest.length && name.startsWith(shortest) && option.startsWith(name)
+}
 
 const GIT_GLOBAL_WITH_VALUE = new Set(
   "-c -C --git-dir --work-tree --namespace --exec-path --config-env".split(" "),
@@ -96,20 +109,29 @@ const judgeGit = (args) => {
     rest.push(args[j])
   }
   const has = (...names) => rest.some((arg) => names.includes(arg))
+  const noVerify = rest.some((arg) => spells(arg, "--no-verify", "--no-veri"))
+  // `-nm x` holds -n; in `-mdone` everything after the value-taking -m is its value.
   const shortCluster = (letter) =>
-    rest.some((arg) => /^-[a-zA-Z]+$/.test(arg) && arg.includes(letter))
+    rest.some((arg) => {
+      if (!/^-[a-zA-Z]+$/.test(arg)) return false
+      for (const flag of arg.slice(1)) {
+        if (flag === letter) return true
+        if ("mFCcto".includes(flag)) return false
+      }
+      return false
+    })
 
-  if (sub === "commit" && (has("--no-verify") || shortCluster("n"))) {
+  if (sub === "commit" && (noVerify || shortCluster("n"))) {
     deny(
       "git commit --no-verify skips the pre-commit and commit-msg gates",
       "fix what the hook reports, then commit normally",
     )
   }
-  if ((sub === "merge" || sub === "rebase") && has("--no-verify")) {
+  if ((sub === "merge" || sub === "rebase") && noVerify) {
     deny(`git ${sub} --no-verify skips the hook gates`, "run without --no-verify")
   }
   if (sub === "push") {
-    if (has("--no-verify")) {
+    if (noVerify) {
       deny(
         "git push --no-verify skips the pre-push gate (npm run check:push)",
         "run npm run check:push, fix what fails, then push normally",
@@ -118,9 +140,14 @@ const judgeGit = (args) => {
     const positional = rest.filter((arg) => !arg.startsWith("-") || arg.startsWith("+"))
     const refspecs = positional.slice(1)
     const forced =
-      has("-f", "--force", "--force-if-includes", "--mirror") ||
-      rest.some((arg) => arg.startsWith("--force-with-lease") || arg.startsWith("+")) ||
-      shortCluster("f")
+      rest.some(
+        (arg) =>
+          arg.startsWith("+") ||
+          ["--force", "--force-with-lease", "--force-if-includes"].some((option) =>
+            spells(arg, option, "--for"),
+          ) ||
+          spells(arg, "--mirror", "--mi"),
+      ) || shortCluster("f")
     if (forced) {
       const targets = refspecs.map((spec) => spec.replace(/^\+/, ""))
       // A source-only symbolic ref (HEAD, @) lands on the current branch, which may be main.
@@ -197,23 +224,33 @@ const judgeCommand = (command) => {
   if (args === undefined) return
   while (/^[A-Za-z_][A-Za-z0-9_]*=/.test(args[0] ?? "")) {
     const assignment = args.shift()
-    if (/^LEFTHOOK=(0|false)$/.test(assignment) || /^LEFTHOOK_(SKIP|EXCLUDE)=.+/.test(assignment)) {
+    if (
+      /^LEFTHOOK=(0|false)$/.test(assignment) ||
+      /^LEFTHOOK_(SKIP|EXCLUDE)=.+/.test(assignment) ||
+      /^GIT_CONFIG_(KEY_\d+|PARAMETERS)=.*core\.hookspath/i.test(assignment)
+    ) {
       deny("disabling git hooks", "run npm run check and repair the reported failure")
     }
   }
   const head = basename(args.shift() ?? "")
   if (head === "git") judgeGit(args)
-  if (head === "npx" || head === "bunx") judgeExecutor(args)
-  if (["npm", "pnpm", "yarn", "bun"].includes(head) && ["exec", "x", "dlx"].includes(args[0])) {
-    judgeExecutor(args.slice(1))
+  if (["npx", "bunx", "pnpx"].includes(head)) judgeExecutor(args)
+  // The subcommand may follow options: `npm --yes exec tsc`, `pnpm --silent dlx tsc`.
+  const executor = args.findIndex((arg) => ["exec", "x", "dlx"].includes(arg))
+  if (["npm", "pnpm", "yarn", "bun"].includes(head) && executor !== -1) {
+    judgeExecutor(args.slice(executor + 1))
   }
   if (head === "rm") {
     const recursive = args.some((arg) => arg === "--recursive" || /^-[a-zA-Z]*[rR]/.test(arg))
+    const repo = fold(root)
     for (const target of args.filter((arg) => !arg.startsWith("-"))) {
+      const path = fold(resolve(cwd, target))
       if (
-        /(^|\/)\.git(\/|$)/.test(target) ||
-        basename(target) === "package-lock.json" ||
-        (recursive && resolve(root, target) === root)
+        path === `${repo}${sep}.git` ||
+        path.startsWith(`${repo}${sep}.git${sep}`) ||
+        path === `${repo}${sep}package-lock.json` ||
+        // The repository itself, or any directory that contains it.
+        (recursive && (path === repo || repo.startsWith(`${path === sep ? "" : path}${sep}`)))
       ) {
         deny(
           "removing git metadata, the lockfile, or the repository",
@@ -232,11 +269,46 @@ const PROTECTED = [
   [/^src\/guides\/catalog\.generated\.ts$/, "edit guides/topics and run node scripts/guides.mjs"],
 ]
 
+// Files that configure the checks themselves. Editing one is sometimes right,
+// but loosening a rule to get green must not happen unseen: a person approves.
+const GUARDRAILS = [
+  /^\.oxlintrc\.json$/,
+  /^biome\.json$/,
+  /^tsconfig\.json$/,
+  /^vitest\.config\.ts$/,
+  /^knip\.json$/,
+  /^\.?lefthook(-local)?\.(yml|yaml|json|toml)$/,
+  /^(commitlint\.config\.[cm]?js|\.commitlintrc.*)$/,
+  /^package\.json$/,
+  /^\.npmrc$/,
+  /^scripts\/(verify|lib\/toolchain)\.mjs$/,
+  /^\.claude\//,
+  /^\.github\/workflows\//,
+]
+
+const ask = (reason) => {
+  process.stdout.write(
+    `${JSON.stringify({
+      hookSpecificOutput: {
+        hookEventName: "PreToolUse",
+        permissionDecision: "ask",
+        permissionDecisionReason: reason,
+      },
+    })}\n`,
+  )
+  process.exit(0)
+}
+
 const tool = input?.tool_input ?? {}
 if (input?.tool_name === "Bash" && typeof tool.command === "string") judgeCommand(tool.command)
 if (["Edit", "Write"].includes(input?.tool_name) && typeof tool.file_path === "string") {
-  const path = relative(root, resolve(root, tool.file_path)).replaceAll("\\", "/")
+  const path = fold(relative(root, resolve(root, tool.file_path)).replaceAll("\\", "/"))
   for (const [pattern, fix] of PROTECTED) {
     if (pattern.test(path)) deny(`${path} is managed by a tool`, fix)
+  }
+  if (GUARDRAILS.some((pattern) => pattern.test(path))) {
+    ask(
+      `${path} configures the checks that judge every change. Approve if the edit keeps them at least as strict; decline if it loosens a rule, threshold, or hook to get green.`,
+    )
   }
 }
