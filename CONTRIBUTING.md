@@ -10,7 +10,7 @@ npm run setup           # git hooks
 npm run doctor          # workspace health
 ```
 
-Node 22.19 or newer and npm 10 or newer. `.node-version` pins 24 for tool managers. The demo store is `.lasso/tasks.json` under whatever directory you run the CLI in (renamed with the CLI, gitignored).
+Node ^22.19, ^24.11, or 26 and newer, and npm 10 or newer: the dev toolchain (tsdown, Vitest) installs on those lines only, while the published CLI runs on any Node 22.19 or newer. `.node-version` pins 24 for tool managers. The demo store is `.lasso/tasks.json` under whatever directory you run the CLI in (renamed with the CLI, gitignored).
 
 ## Day to day
 

@@ -42,9 +42,6 @@ export const taskList = defineQuery({
       : data.items.map((task) => `[${task.status}] ${task.id}  ${task.title}`).join("\n"),
   collection: {
     fields: ["id", "title", "status", "createdAt"],
-    // The encoded payload is the schema-encoded TaskList; rows come from it
-    // so JSON, NDJSON, and projection always agree.
-    // oxlint-disable-next-line typescript/no-unsafe-type-assertion
-    items: (encoded) => (encoded as { items: ReadonlyArray<Record<string, unknown>> }).items,
+    items: (encoded) => encoded.items,
   },
 })

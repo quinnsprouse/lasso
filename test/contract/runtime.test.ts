@@ -477,6 +477,36 @@ describe("parser failures settle through the kit-owned classification", () => {
     expect(result.code).toBe(64)
   })
 
+  it("a mistyped command offers the corrected invocation, previewing instead of applying", async () => {
+    const result = await invoke(["counter", "bmup", "--value", "3", "--yes"])
+    expect(result.code).toBe(64)
+    const envelope = lines(result.stdout)[0]!
+    expect(envelope.error.fix).toBe('use "bump" instead of "bmup"')
+    expect(envelope.next[0]).toEqual({
+      message: 'did you mean "bump"?',
+      args: ["counter", "bump", "--value", "3", "--json"],
+    })
+    // The parser renders no second copy of the error: renderOutcome owns it.
+    expect(result.stderr).toBe("")
+  })
+
+  it("a mistyped flag is corrected in its inline form too", async () => {
+    const envelope = lines((await invoke(["counter", "bump", "--vaule=3"])).stdout)[0]!
+    expect(envelope.error.fix).toBe('use "--value" instead of "--vaule"')
+    expect(envelope.next[0].args).toEqual(["counter", "bump", "--value=3", "--json"])
+  })
+
+  it("a correction that would not parse is left out without a warning", async () => {
+    // "args" is the closest command, but it needs three positionals.
+    const envelope = lines((await invoke(["counter", "argz"])).stdout)[0]!
+    const mentions = [
+      ...envelope.next.map((action: { message: string }) => action.message),
+      ...envelope.warnings,
+    ]
+    expect(mentions.some((text: string) => text.includes("did you mean"))).toBe(false)
+    expect(envelope.error.fix).toContain("describe")
+  })
+
   it("typed arguments parse and round-trip", async () => {
     const result = await invoke(["counter", "args", "2", "high", "./somewhere"])
     expect(result.code).toBe(0)
@@ -586,22 +616,21 @@ describe("stdout purity against handler misbehavior", () => {
 
   it("every Console method a handler can call lands on stderr, never in the envelope stream", async () => {
     const stdoutWrite = vi.spyOn(process.stdout, "write").mockImplementation(() => true)
-    const stderrWrite = vi.spyOn(process.stderr, "write").mockImplementation(() => true)
     const result = await invoke(["counter", "leak"])
     expect(result.code).toBe(0)
     expect(lines(result.stdout).length).toBe(1)
     expect(lines(result.stdout)[0]!.status).toBe("ok")
     expect(stdoutWrite).not.toHaveBeenCalled()
-    const leaked = stderrWrite.mock.calls.map((call) => String(call[0])).join("")
+    const leaked = result.stderr
     expect(leaked.split("debug leak").length - 1).toBe(4)
     expect(leaked).toContain("leak")
   })
 
   it("Console output in ndjson mode leaves the event stream valid", async () => {
-    vi.spyOn(process.stderr, "write").mockImplementation(() => true)
     const result = await invoke(["counter", "leak"], "ndjson")
     expect(result.code).toBe(0)
     expect(lines(result.stdout, "ndjson").map((event) => event.event)).toEqual(["summary"])
+    expect(result.stderr).toContain("leak")
   })
 
   it("a progress effect run after the terminal event is a defect, not a write", async () => {

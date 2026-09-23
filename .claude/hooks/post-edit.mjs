@@ -1,9 +1,9 @@
 #!/usr/bin/env node
 // PostToolUse cannot undo an edit; exit 2 returns actionable format/lint failures.
 // Full project typechecking is opt-in. Per-step timeouts stay below the hook's 120s budget.
-import { execFileSync } from "node:child_process"
+import { execFileSync, spawnSync } from "node:child_process"
 import { readFileSync } from "node:fs"
-import { relative, resolve } from "node:path"
+import { join, relative, resolve } from "node:path"
 
 const { repoRoot, ensureInstalled, tool, workspaceFrom } = await import(
   "../../scripts/lib/toolchain.mjs"
@@ -27,13 +27,20 @@ if (typeof filePath !== "string") {
 const root = workspaceFrom(input?.cwd) ?? repoRoot
 const absolute = resolve(root, filePath)
 const rel = relative(root, absolute)
+// Guide topics are the source of a generated module (see step 0 below).
+const isTopic = /^guides\/topics\/[^/]+\.md$/.test(rel.replaceAll("\\", "/"))
 // Only files inside the repo, and only the kinds Biome and the type-aware
 // tools understand (Markdown and YAML have no formatter here; lefthook's
 // format step skips them the same way).
-if (rel.startsWith("..") || !/\.(ts|mjs|cjs|json)$/.test(rel)) {
+if (rel.startsWith("..") || (!isTopic && !/\.(ts|mjs|cjs|json)$/.test(rel))) {
   process.exit(0)
 }
-if (/^(node_modules|dist|coverage|\.lasso)\//.test(rel)) {
+// Ignored files (`.scratch/` experiments, build output) are not the project's
+// to format or lint; git answers for the rest of .gitignore too.
+if (
+  /^(node_modules|dist|coverage|\.lasso)\//.test(rel) ||
+  spawnSync("git", ["check-ignore", "-q", rel], { cwd: root }).status === 0
+) {
   process.exit(0)
 }
 
@@ -46,6 +53,32 @@ try {
   ensureInstalled(root)
 } catch (error) {
   block(`post-edit hook: ${error.message}\nfix: ${error.fix}`)
+}
+
+// 0. A guide topic: regenerate the catalog now, so a bad frontmatter line or an
+//    oversized body fails at the edit and the generated module never goes stale.
+if (isTopic) {
+  try {
+    execFileSync(process.execPath, [join(root, "scripts", "guides.mjs")], {
+      cwd: root,
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "pipe"],
+      timeout: 30_000,
+    })
+  } catch (error) {
+    block(
+      `guide topic ${rel} did not compile; the catalog is unchanged:\n${`${error.stdout ?? ""}${error.stderr ?? ""}`.slice(0, 4000)}\nfix: repair ${rel}; the catalog regenerates on the next edit`,
+    )
+  }
+  process.stdout.write(
+    `${JSON.stringify({
+      hookSpecificOutput: {
+        hookEventName: "PostToolUse",
+        additionalContext: `Regenerated src/guides/catalog.generated.ts from ${rel}. describe records topic sizes: run npm run surface:update and review the snapshot diff before npm run check.`,
+      },
+    })}\n`,
+  )
+  process.exit(0)
 }
 
 /** Runs a tool; returns { ok, output }. A timeout counts as a failure so it is never silently green. */

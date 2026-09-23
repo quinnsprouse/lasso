@@ -3,12 +3,16 @@ import type { AnyContract, QueryContract } from "../contract/contract.ts"
 import { defineQuery } from "../contract/contract.ts"
 import { describeCli, schemaDocument } from "../contract/jsonschema.ts"
 import { Errors } from "../errors.ts"
+import { DISCOVER } from "../output/guidance.ts"
 import { CLI_NAME, CLI_VERSION } from "../meta.ts"
 
 // Read the roster lazily so describe/schema can include their own definitions.
 export const makeIntrospection = (
   roster: () => ReadonlyArray<AnyContract>,
-): { describe: QueryContract<any, any>; schema: QueryContract<any, any> } => ({
+): {
+  describe: QueryContract<any, any, never, any>
+  schema: QueryContract<any, any, never, any>
+} => ({
   describe: defineQuery({
     name: "describe",
     summary: "Describe every command, capability, guide, and protocol detail as JSON",
@@ -36,7 +40,7 @@ export const makeIntrospection = (
         return yield* Errors.notFound({
           message: `no command named "${input.command}"`,
           fix: `run ${CLI_NAME} describe --json to list commands`,
-          next: [{ message: "list every command", args: ["describe", "--json"] }],
+          next: [DISCOVER],
         })
       }
       return describeCli({

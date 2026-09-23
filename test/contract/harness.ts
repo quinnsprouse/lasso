@@ -1,7 +1,8 @@
+import { Writable } from "node:stream"
 import { Effect, FileSystem, Layer, Path, Schema, Sink, Stdio, Terminal } from "effect"
 import type { Exit } from "effect"
 import { ChildProcessSpawner } from "effect/unstable/process"
-import { machineOutputLayer, runCli } from "../../src/contract/adapter.ts"
+import { outputLayer, runCli } from "../../src/contract/adapter.ts"
 import type { AnyContract } from "../../src/contract/contract.ts"
 import { surfaceOf } from "../../src/contract/surface.ts"
 import type { Task } from "../../src/domain/task.ts"
@@ -14,8 +15,9 @@ import {
 import type { OutputMode } from "../../src/output/format.ts"
 import { negotiate } from "../../src/output/format.ts"
 import { Progress } from "../../src/output/progress.ts"
-import { Renderer } from "../../src/output/renderer.ts"
+import { Renderer, TerminalLatch } from "../../src/output/renderer.ts"
 import { settleExit } from "../../src/runtime.ts"
+import { TaskFeed } from "../../src/services/feed.ts"
 import { StoreReader, StoreWriter } from "../../src/services/store.ts"
 
 /**
@@ -38,12 +40,45 @@ const collect = (into: Array<string>) =>
     }),
   )
 
+/** What the parser needs from the platform, with no terminal input, processes, or files. */
+export const testPlatform = (stdio: Layer.Layer<Stdio.Stdio>) =>
+  Layer.mergeAll(
+    FileSystem.layerNoop({}),
+    Path.layer,
+    stdio,
+    Layer.succeed(
+      Terminal.Terminal,
+      Terminal.make({
+        columns: Effect.succeed(80),
+        rows: Effect.succeed(24),
+        readInput: Effect.die("no input in tests"),
+        readLine: Effect.die("no input in tests"),
+        display: () => Effect.void,
+      }),
+    ),
+    Layer.succeed(
+      ChildProcessSpawner.ChildProcessSpawner,
+      ChildProcessSpawner.make(() => Effect.die("no processes in tests")),
+    ),
+  )
+
+/** A stream whose writes append to `into`: stands in for stdout or stderr. */
+const sink = (into: Array<string>) =>
+  new Writable({
+    write(chunk, _encoding, done) {
+      into.push(String(chunk))
+      done()
+    },
+  })
+
 export const makeInvoke =
   (contracts: ReadonlyArray<AnyContract>) =>
   async (
     argv: ReadonlyArray<string>,
     format: OutputMode["format"] = "json",
     tasks: ReadonlyArray<Task> = [],
+    /** The titles the fake task feed serves at any URL. */
+    feed: ReadonlyArray<string> = [],
   ): Promise<Invocation> => {
     const mode = negotiate({
       argv,
@@ -63,37 +98,21 @@ export const makeInvoke =
       Layer.succeed(StoreReader, StoreReader.of({ load: Effect.succeed(tasks) })),
       Layer.succeed(
         StoreWriter,
-        StoreWriter.of({ modify: (transform) => Effect.sync(() => transform(tasks) ?? tasks) }),
+        StoreWriter.of({ modify: (transform) => Effect.sync(() => transform(tasks).result) }),
       ),
+      Layer.succeed(TaskFeed, TaskFeed.of({ titles: () => Effect.succeed(feed) })),
     )
 
-    const environment = Layer.mergeAll(
-      FileSystem.layerNoop({}),
-      Path.layer,
-      testStdio,
-      Layer.succeed(
-        Terminal.Terminal,
-        Terminal.make({
-          columns: Effect.succeed(80),
-          rows: Effect.succeed(24),
-          readInput: Effect.die("no input in tests"),
-          readLine: Effect.die("no input in tests"),
-          display: () => Effect.void,
-        }),
-      ),
-      Layer.succeed(
-        ChildProcessSpawner.ChildProcessSpawner,
-        ChildProcessSpawner.make(() => Effect.die("no processes in tests")),
-      ),
-    )
+    const environment = testPlatform(testStdio)
 
-    const rendererLayer = Renderer.layer(mode, "lasso")
-    const layer = Layer.mergeAll(
-      fakeServices,
-      rendererLayer,
-      Progress.layer.pipe(Layer.provideMerge(rendererLayer)),
-      ...(mode.format === "text" ? [] : [machineOutputLayer.pipe(Layer.provide(rendererLayer))]),
-    ).pipe(Layer.provideMerge(environment))
+    // Console output (help, parser diagnostics, stray handler logging) lands in
+    // this invocation's streams, exactly where bin.ts would send it.
+    const terminal = new TerminalLatch()
+    const layer = outputLayer(mode, { stdout: sink(out), stderr: sink(err) }).pipe(
+      Layer.provideMerge(Layer.mergeAll(fakeServices, Progress.layer)),
+      Layer.provideMerge(Renderer.layer(mode, "lasso", terminal)),
+      Layer.provideMerge(environment),
+    )
     const exit: Exit.Exit<void, unknown> = await Effect.runPromiseExit(
       runCli({ binName: "lasso", summary: "test cli", version: "0.0.0", contracts }).pipe(
         Effect.provide(layer),
@@ -106,6 +125,7 @@ export const makeInvoke =
         binName: "lasso",
         describeData: () => ({}),
         surfaces: contracts.map(surfaceOf),
+        written: terminal.code,
       }).pipe(Effect.provide(environment)),
     )
     for (const chunk of settled.writes) {
@@ -132,3 +152,15 @@ export const lines = (text: string, wire: "json" | "ndjson" = "json"): Array<Rec
       }
       return value
     })
+
+/**
+ * A documented `<bin> …` line as argv: placeholders are filled (`<token>` with
+ * a token-shaped value, anything else with `x`) and quoted spans stay one token.
+ */
+export const argvOf = (line: string): ReadonlyArray<string> =>
+  line
+    .replace(/<token>/g, "plan_0000000000000000")
+    .replace(/<[^>]+>/g, "x")
+    .match(/"[^"]*"|\S+/g)!
+    .slice(1)
+    .map((token) => token.replace(/^"|"$/g, ""))

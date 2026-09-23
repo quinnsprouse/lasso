@@ -7,6 +7,7 @@ import { guideInventory } from "../guides/catalog.ts"
 import type { GlobalFlag } from "./invocation.ts"
 import { GLOBAL_FLAGS } from "./invocation.ts"
 import { ExitCode } from "../output/exit.ts"
+import { ENVIRONMENT } from "../settings.ts"
 import {
   ConfirmationEnvelope,
   ErrorEnvelope,
@@ -24,30 +25,35 @@ import {
 
 const DIALECT = "https://json-schema.org/draft/2020-12/schema"
 
-const paramJsonSchema = (param: SurfaceParam): Record<string, unknown> => {
-  const base = (() => {
-    switch (param.type) {
-      case "boolean":
-        return { type: "boolean" }
-      case "integer":
-        return { type: "integer" }
-      case "choice":
-        return { type: "string", enum: [...(param.choices ?? [])] }
-      default:
-        return { type: "string" }
-    }
-  })()
-  return {
-    ...base,
-    description: param.description,
-    ...(param.default !== undefined ? { default: param.default } : {}),
+const paramType = (param: SurfaceParam): Record<string, unknown> => {
+  switch (param.type) {
+    case "boolean":
+      return { type: "boolean" }
+    case "integer":
+      return { type: "integer" }
+    case "choice":
+      return { type: "string", enum: [...(param.choices ?? [])] }
+    case "path":
+    case "string":
+      return { type: "string" }
   }
 }
 
-/** A standalone draft 2020-12 document an agent can hand to any validator. */
+const paramJsonSchema = (param: SurfaceParam): Record<string, unknown> => ({
+  ...paramType(param),
+  description: param.description,
+  ...(param.default !== undefined ? { default: param.default } : {}),
+})
+
+/**
+ * A standalone draft 2020-12 document an agent can hand to any validator.
+ * Objects are closed (`additionalProperties: false`): the published schemas
+ * describe exactly what this version emits.
+ */
 const standaloneSchema = (ast: SchemaAST.AST): Record<string, unknown> => {
   const document = SchemaRepresentation.toJsonSchemaDocument(
     SchemaRepresentation.toRepresentation(ast),
+    { onExcessProperty: "error" },
   )
   const defs = document.definitions as Record<string, unknown>
   return {
@@ -104,7 +110,8 @@ export const describeCli = (options: {
   protocol: {
     formats: ["json", "text", "ndjson"],
     globalFlags: GLOBAL_FLAGS.map(describeGlobalFlag),
-    flagSpellings: "Boolean flags also accept a --no-<name> negated form and --<name>=true|false.",
+    flagSpellings:
+      "Boolean command flags also accept a --no-<name> negated form and --<name>=true|false; global flags do not.",
     // Envelope and event shapes: see `schema --json` (protocol.envelopes, protocol.streamEvent).
     guidance: {
       next: "Executable next moves as argv for this binary (no bin name), importance-ordered, at most 3, on every terminal outcome.",
@@ -112,6 +119,7 @@ export const describeCli = (options: {
         "Guide topic ids to read for the model this outcome assumes; fetch with: guide get <topic>",
     },
     ndjsonEvents: ["item", "warning", "progress", "summary", "confirmation_required", "error"],
+    environment: Object.values(ENVIRONMENT),
     exitCodes: ExitCode,
     errorCatalog: errorCatalogTable(),
   },

@@ -24,9 +24,10 @@ export const GuidanceFields = {
   guides: Schema.Array(Schema.String),
 }
 
-export interface Guidance {
-  readonly next: ReadonlyArray<NextAction>
-  readonly guides: ReadonlyArray<string>
-}
-
 export const NEXT_LIMIT = 3
+
+/** The next move after any usage error: discover the real surface. */
+export const DISCOVER: NextAction = {
+  message: "list every command and flag",
+  args: ["describe", "--json"],
+}

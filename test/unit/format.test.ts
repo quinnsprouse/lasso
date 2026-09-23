@@ -108,6 +108,13 @@ describe("terminator and conflicts", () => {
 })
 
 describe("built-in output policy", () => {
+  it("treats an empty LASSO_FORMAT as unset and lets auto defer to a concrete format", () => {
+    expect(negotiate({ ...base, stdoutIsTTY: false, env: { LASSO_FORMAT: "" } }).format).toBe(
+      "json",
+    )
+    expect(negotiate({ ...base, argv: ["--format=auto", "--json"] }).format).toBe("json")
+  })
+
   it("allows the wizard only on an interactive text terminal", () => {
     expect(negotiate({ ...base, argv: ["--wizard"] }).format).toBe("text")
     expect(() => negotiate({ ...base, argv: ["--wizard", "--json"] })).toThrow(/interactive/)

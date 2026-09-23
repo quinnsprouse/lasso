@@ -6,7 +6,7 @@ Each command is one contract that generates its parsing, help, schemas, and docs
 
 ## Quick start
 
-Use Node 22.19 or newer, npm 10 or newer, and Git.
+Use Node ^22.19, ^24.11, or 26 and newer, npm 10 or newer, and Git. (The CLI you ship runs on any Node 22.19 or newer.)
 
 ```bash
 npx degit quinnsprouse/lasso my-cli   # or: gh repo create my-cli --template quinnsprouse/lasso --clone
@@ -32,6 +32,7 @@ In JSON mode, Lasso writes one envelope to stdout for each invocation. It sends 
 - Every mutation begins with a read-only plan. The runtime owns `--confirm`, `--dry-run`, and `--yes`.
 - Exit code 4 requests confirmation. `transient: true` means a retry may work (exits 69, 75, and 130 carry it).
 - `describe --json` lists every command. `schema --json` returns JSON Schema draft 2020-12.
+- Settings are typed and discoverable: `describe --json` lists every environment variable, and secrets stay redacted. API calls go through Effect's `HttpClient` on Node's built-in fetch, with retries and HTTP failures mapped to honest `transient` flags.
 - Every outcome carries `next` (executable next moves) and `guides` (topic ids); `guide get <topic>` serves version-matched guides for what the surface cannot express, and `skills/` ships the skill that routes agents to them.
 - A committed snapshot makes command and schema changes visible in review. Tests require the snapshot to stay current; reviewers decide compatibility.
 - Claude Code hooks in `.claude/` check direct commands and report formatting and lint errors after edits. Full type and Effect checks after each edit are opt-in.
@@ -47,7 +48,7 @@ npm run check:push                           # add build, dead code, e2e, and pa
 npm run check:ci                             # add coverage and the Starter Contract
 npm run build                                # build dist/bin.cjs
 npm run test:starter                         # test a fresh archive of the starter
-node scripts/new-command.mjs <group> <name>  # scaffold and register a command
+node scripts/new-command.mjs <group> <name>  # scaffold and register a query (--mutation: plan + apply)
 node scripts/guides.mjs                      # inline guides/topics/*.md into the bundle
 npm run surface:update                       # record an additive surface change
 npm run setup                                # install Git hooks
@@ -59,9 +60,9 @@ Agents start with [AGENTS.md](AGENTS.md). [CONTEXT.md](CONTEXT.md) defines proje
 
 ## Stack
 
-- [Effect](https://effect.website) v4 beta with `effect/unstable/cli`
+- [Effect](https://effect.website) v4 release candidate with `effect/unstable/cli`, tested with `@effect/vitest`
 - TypeScript 7 with type-aware [oxlint](https://oxc.rs) and [Biome](https://biomejs.dev)
-- [tsdown](https://tsdown.dev) with one self-contained CommonJS bundle
+- [tsdown](https://tsdown.dev) with one self-contained, minified CommonJS bundle; the launcher enables Node's compile cache, so a command adds about 15 ms to Node's own startup
 - [Vitest](https://vitest.dev), fast-check, and execa
 - [lefthook](https://lefthook.dev), commitlint, and [knip](https://knip.dev)
 

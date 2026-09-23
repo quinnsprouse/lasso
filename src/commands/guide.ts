@@ -9,7 +9,7 @@ import { CLI_NAME } from "../meta.ts"
 
 export const makeGuideCommands = (
   roster: () => ReadonlyArray<AnyContract>,
-): { list: QueryContract<any, any>; get: QueryContract<any, any> } => ({
+): { list: QueryContract<any, any, never, any>; get: QueryContract<any, any, never, any> } => ({
   list: defineQuery({
     name: "guide list",
     summary: "List every guide topic with its brief, size, and the commands it covers",
@@ -39,8 +39,7 @@ export const makeGuideCommands = (
           ].join("\n"),
     collection: {
       fields: ["topic", "title", "brief", "bytes", "commands"],
-      // oxlint-disable-next-line typescript/no-unsafe-type-assertion
-      items: (encoded) => (encoded as { items: ReadonlyArray<Record<string, unknown>> }).items,
+      items: (encoded) => encoded.items,
     },
   }),
   get: defineQuery({

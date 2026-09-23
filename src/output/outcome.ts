@@ -41,6 +41,9 @@ export type Outcome =
       readonly details?: unknown
     } & WithGuidance)
 
+/** What a command's own run writes. Failures are never emitted; settlement renders them. */
+export type CommandOutcome = Extract<Outcome, { readonly kind: "ok" | "confirmation" }>
+
 export interface Write {
   readonly stream: "stdout" | "stderr"
   readonly text: string

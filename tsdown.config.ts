@@ -14,7 +14,9 @@ export default defineConfig({
     alwaysBundle: /^(?!node:)/,
     onlyBundle: ["effect", "@effect/platform-node", "@effect/platform-node-shared"],
   },
-  minify: false,
+  // Smaller and faster to parse, with names kept, so `node --inspect-brk
+  // dist/bin.cjs` and defect messages stay readable.
+  minify: { compress: true, mangle: false, codegen: { removeWhitespace: true } },
   // effect's ConfigProvider probes import.meta?.env; under CJS it falls back
   // to process.env, so replacing import.meta with {} is the intended result.
   define: { "import.meta": "{}" },

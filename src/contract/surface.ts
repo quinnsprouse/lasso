@@ -1,3 +1,4 @@
+import type { Types } from "effect"
 import type { AnyContract, Capabilities, ParamSpec } from "./contract.ts"
 import { capabilitiesOf } from "./contract.ts"
 import type { ErrorCode } from "../errors.ts"
@@ -98,40 +99,23 @@ const frameworkErrorCodes = (contract: AnyContract): ReadonlyArray<ErrorCode> =>
     : ["invalid_usage", "invalid_data", "internal_error", "interrupted"]
 
 export const surfaceOf = (contract: AnyContract): CommandSurface => {
-  const contractParams: Array<SurfaceParam> = Object.entries(
-    contract.params as Record<string, ParamSpec>,
-  ).map(([key, spec]) => {
-    const param: {
-      key: string
-      cliName: string
-      kind: "argument" | "flag"
-      type: SurfaceParam["type"]
-      description: string
-      required: boolean
-      owner: "contract"
-      alias?: string
-      default?: string | number | boolean
-      choices?: ReadonlyArray<string>
-    } = {
-      key,
-      cliName: spec.kind === "argument" ? `<${kebabCase(key)}>` : `--${kebabCase(key)}`,
-      kind: spec.kind,
-      type: spec.type,
-      description: spec.description,
-      required: spec.kind === "argument",
-      owner: "contract",
-    }
-    if ("alias" in spec && spec.alias !== undefined) {
-      param.alias = spec.alias
-    }
-    if ("default" in spec && spec.default !== undefined) {
-      param.default = spec.default
-    }
-    if ("choices" in spec && spec.choices !== undefined) {
-      param.choices = [...spec.choices]
-    }
-    return param
-  })
+  const contractParams = Object.entries(contract.params as Record<string, ParamSpec>).map(
+    ([key, spec]) => {
+      const param: Types.Mutable<SurfaceParam> = {
+        key,
+        cliName: spec.kind === "argument" ? `<${kebabCase(key)}>` : `--${kebabCase(key)}`,
+        kind: spec.kind,
+        type: spec.type,
+        description: spec.description,
+        required: spec.kind === "argument",
+        owner: "contract",
+      }
+      if (spec.alias !== undefined) param.alias = spec.alias
+      if (spec.default !== undefined) param.default = spec.default
+      if (spec.choices !== undefined) param.choices = [...spec.choices]
+      return param
+    },
+  )
 
   const framework: Array<SurfaceParam> =
     contract.kind === "mutation"

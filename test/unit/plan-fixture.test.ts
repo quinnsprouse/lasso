@@ -1,5 +1,5 @@
+import { expect, it } from "@effect/vitest"
 import { Clock, Context, Effect, Layer, Schema } from "effect"
-import { expect, it } from "vitest"
 import { defineMutation } from "../../src/contract/contract.ts"
 import { planFixture } from "../contract/plan-fixture.ts"
 
@@ -25,7 +25,7 @@ const lookup = defineMutation({
   apply: (value) => Effect.succeed(value),
 })
 
-it("accepts explicit domain inputs and read services unrelated to the task demo", async () => {
+it.effect("accepts explicit domain inputs and read services unrelated to the task demo", () => {
   const fixture = planFixture(lookup, {
     name: "a known record",
     input: { id: "record_17" },
@@ -34,10 +34,10 @@ it("accepts explicit domain inputs and read services unrelated to the task demo"
     }),
     expected: { plan: 17 },
   })
-  await fixture.expectPlan()
+  return fixture.expectPlan()
 })
 
-it("rejects a plan that changes when the clock changes", async () => {
+it.effect("rejects a plan that changes when the clock changes", () => {
   const timed = defineMutation({
     ...lookup,
     name: "record timed",
@@ -49,5 +49,9 @@ it("rejects a plan that changes when the clock changes", async () => {
     layer: Layer.empty,
     expected: { plan: 1_700_000_000_000 },
   })
-  await expect(fixture.expectPlan()).rejects.toThrow(/expected/)
+  return Effect.gen(function* () {
+    const outcome = yield* Effect.exit(fixture.expectPlan())
+    expect(outcome._tag).toBe("Failure")
+    expect(String(outcome)).toMatch(/expected/)
+  })
 })

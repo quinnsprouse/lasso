@@ -1,3 +1,4 @@
+// oxlint-disable-next-line effecttsgo/node-builtin-import -- a pure, synchronous checksum; no I/O for a service to own
 import { createHash } from "node:crypto"
 
 /**
@@ -56,3 +57,6 @@ const sortValue = (value: unknown): unknown => {
 
 export const planToken = (plan: unknown): string =>
   `plan_${createHash("sha256").update(canonicalJson(plan)).digest("hex").slice(0, 16)}`
+
+/** True for a string shaped like a planToken, whatever plan it binds. */
+export const isPlanToken = (value: string): boolean => /^plan_[0-9a-f]{16}$/.test(value)

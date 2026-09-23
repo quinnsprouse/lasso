@@ -106,13 +106,16 @@ if (check) {
   const dir = mkdtempSync(join(tmpdir(), "lasso-guides-"))
   const candidate = join(dir, "catalog.generated.ts")
   writeFileSync(candidate, body)
+  let formatted
   try {
     execTool("biome", ["format", "--write", candidate], { stdio: "ignore" })
-    if (readFileSync(candidate, "utf8") !== current) {
-      fail(`${relative(repoRoot, TARGET)} is stale; run: node scripts/guides.mjs`)
-    }
+    formatted = readFileSync(candidate, "utf8")
   } finally {
     rmSync(dir, { recursive: true, force: true })
+  }
+  // fail() exits the process, so it runs only after the temp dir is gone.
+  if (formatted !== current) {
+    fail(`${relative(repoRoot, TARGET)} is stale; run: node scripts/guides.mjs`)
   }
   process.stderr.write(`guide catalog current (${topics.length} topics)\n`)
 } else {

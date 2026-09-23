@@ -4,8 +4,8 @@
 // oxlint patch is verified by actually catching a planted floating Effect,
 // not by looking for backup files. Pass --json for machine output.
 import { execFileSync } from "node:child_process"
-import { existsSync, readFileSync, rmSync, writeFileSync } from "node:fs"
-import { join } from "node:path"
+import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs"
+import { join, resolve } from "node:path"
 import { ensureInstalled, execTool, repoRoot } from "./lib/toolchain.mjs"
 
 const asJson = process.argv.includes("--json")
@@ -41,10 +41,20 @@ const versionAtLeast = (actual, wanted) => {
   return true
 }
 
+// The dev toolchain (tsdown, Vitest) installs on these lines only; the
+// published CLI itself runs on any Node >= 22.19 (package.json engines).
 check("node version", () => {
   const version = process.version.slice(1)
-  if (!versionAtLeast(version, "22.19.0")) {
-    fail(`node ${version} is below the required 22.19`, "install Node 24 LTS")
+  const [major] = version.split(".").map(Number)
+  const supported =
+    (major === 22 && versionAtLeast(version, "22.19.0")) ||
+    (major === 24 && versionAtLeast(version, "24.11.0")) ||
+    major >= 26
+  if (!supported) {
+    fail(
+      `node ${version} cannot install the dev toolchain (needs ^22.19, ^24.11, or >=26)`,
+      "install Node 24 LTS",
+    )
   }
   return `node ${version}`
 })
@@ -80,7 +90,15 @@ check("git repository", () => {
 })
 
 check("git hooks installed", () => {
-  const hook = join(repoRoot, ".git", "hooks", "pre-commit")
+  // --git-path resolves the hooks directory in a linked worktree too, where .git is a file.
+  const hook = resolve(
+    repoRoot,
+    execFileSync("git", ["rev-parse", "--git-path", "hooks/pre-commit"], {
+      cwd: repoRoot,
+      encoding: "utf8",
+      stdio: "pipe",
+    }).trim(),
+  )
   if (!existsSync(hook) || !readFileSync(hook, "utf8").includes("lefthook")) {
     fail("lefthook hooks are not installed", "run: npm run setup")
   }
@@ -98,29 +116,38 @@ const installedVersion = (pkg) => {
 
 check("effect versions aligned", () => {
   const effect = installedVersion("effect")
-  const platform = installedVersion("@effect/platform-node")
-  if (effect !== platform) {
+  const drifted = ["@effect/platform-node", "@effect/vitest"]
+    .map((pkg) => [pkg, installedVersion(pkg)])
+    .filter(([, version]) => version !== effect)
+  if (drifted.length > 0) {
     fail(
-      `effect ${effect} and @effect/platform-node ${platform} are out of lockstep`,
-      "pin both packages to the same exact version and reinstall",
+      `effect ${effect} and ${drifted.map(([pkg, version]) => `${pkg} ${version}`).join(", ")} are out of lockstep`,
+      `pin effect, @effect/platform-node, and @effect/vitest to the same exact version and reinstall`,
     )
   }
   return `effect ${effect}`
 })
 
 check("effect oxlint patch active", () => {
-  // Functional probe: a floating Effect must trip the effecttsgo rule.
-  // Type-aware lint only sees files inside tsconfig's include, so the probe
-  // lives in src/ for the duration of one lint run and is always removed.
-  const probe = join("src", `__doctor_probe_${process.pid}__.ts`)
+  // Functional probe: a floating Effect must trip the effecttsgo rule. The
+  // probe gets its own tsconfig in node_modules/.cache, outside every project
+  // glob, so a leftover probe (a killed doctor) never reaches lint or tsc.
+  const dir = join(repoRoot, "node_modules", ".cache", `lasso-doctor-${process.pid}`)
+  mkdirSync(dir, { recursive: true })
   writeFileSync(
-    join(repoRoot, probe),
+    join(dir, "tsconfig.json"),
+    `${JSON.stringify({ extends: join(repoRoot, "tsconfig.json"), include: ["probe.ts"] })}\n`,
+  )
+  writeFileSync(
+    join(dir, "probe.ts"),
     'import { Effect } from "effect"\nexport const f = () => {\n  Effect.succeed(1)\n  return 2\n}\n',
   )
   try {
     const output = (() => {
       try {
-        return execTool("oxlint", ["--type-aware", probe], { stdio: "pipe" })
+        return execTool("oxlint", ["--type-aware", "--no-ignore", join(dir, "probe.ts")], {
+          stdio: "pipe",
+        })
       } catch (error) {
         return `${error.stdout ?? ""}${error.stderr ?? ""}`
       }
@@ -132,7 +159,7 @@ check("effect oxlint patch active", () => {
       )
     }
   } finally {
-    rmSync(join(repoRoot, probe), { force: true })
+    rmSync(dir, { recursive: true, force: true })
   }
   return "effecttsgo rules firing"
 })

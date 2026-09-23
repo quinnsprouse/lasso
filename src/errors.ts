@@ -1,38 +1,50 @@
 import { Schema } from "effect"
 import type { GuideTopic } from "./guides/catalog.generated.ts"
-import type { ExitCode } from "./output/exit.ts"
-import { ExitCode as Exit } from "./output/exit.ts"
-import type { NextAction as NextActionType } from "./output/guidance.ts"
+import { ExitCode } from "./output/exit.ts"
 import { NextAction } from "./output/guidance.ts"
 
 /**
  * The error catalog: one table owns every error code, its exit code, its
- * transience, and who raises it. Everything else derives from it: the
- * `Errors.*` factories (one per command-raised code, named after the code),
- * the `ErrorCode` type, exit mapping, and `describe` output. Adding a code
- * here is the only way to add one.
+ * transience, and who raises it. The `ErrorCode` type, exit mapping, and
+ * `describe` output derive from it; the `Errors.*` factories (one per
+ * command-raised code, named after the code) are checked against it. Adding a
+ * code here is the only way to add one.
  */
 export const ERROR_CATALOG = {
-  invalid_usage: { exit: Exit.usage, transient: false, raisedBy: "command" },
-  invalid_data: { exit: Exit.invalidData, transient: false, raisedBy: "command" },
-  not_found: { exit: Exit.invalidData, transient: false, raisedBy: "command" },
-  resource_conflict: { exit: Exit.cannotWrite, transient: false, raisedBy: "command" },
-  cannot_write: { exit: Exit.cannotWrite, transient: false, raisedBy: "command" },
-  service_unavailable: { exit: Exit.serviceUnavailable, transient: true, raisedBy: "command" },
-  transient_failure: { exit: Exit.transient, transient: true, raisedBy: "command" },
-  auth_failure: { exit: Exit.auth, transient: false, raisedBy: "command" },
-  invalid_config: { exit: Exit.config, transient: false, raisedBy: "command" },
-  stale_confirmation: { exit: Exit.usage, transient: false, raisedBy: "command" },
+  invalid_usage: { exit: ExitCode.usage, transient: false, raisedBy: "command" },
+  invalid_data: { exit: ExitCode.invalidData, transient: false, raisedBy: "command" },
+  not_found: { exit: ExitCode.invalidData, transient: false, raisedBy: "command" },
+  resource_conflict: { exit: ExitCode.cannotWrite, transient: false, raisedBy: "command" },
+  cannot_write: { exit: ExitCode.cannotWrite, transient: false, raisedBy: "command" },
+  service_unavailable: { exit: ExitCode.serviceUnavailable, transient: true, raisedBy: "command" },
+  transient_failure: { exit: ExitCode.transient, transient: true, raisedBy: "command" },
+  auth_failure: { exit: ExitCode.auth, transient: false, raisedBy: "command" },
+  invalid_config: { exit: ExitCode.config, transient: false, raisedBy: "command" },
+  stale_confirmation: { exit: ExitCode.usage, transient: false, raisedBy: "command" },
   /** A defect: a bug in the CLI, never an expected failure a handler raises. */
-  internal_error: { exit: Exit.internalDefect, transient: false, raisedBy: "runtime" },
-  /** SIGINT while running; the runtime alone produces it. */
-  interrupted: { exit: Exit.interrupted, transient: true, raisedBy: "runtime" },
+  internal_error: { exit: ExitCode.internalDefect, transient: false, raisedBy: "runtime" },
+  /** SIGINT or SIGTERM while running; the runtime alone produces it. */
+  interrupted: { exit: ExitCode.interrupted, transient: true, raisedBy: "runtime" },
 } as const satisfies Record<
   string,
   { exit: ExitCode; transient: boolean; raisedBy: "command" | "runtime" }
 >
 
 export type ErrorCode = keyof typeof ERROR_CATALOG
+
+/** False for a code built outside the catalog (a hand-built AppError). */
+export const isErrorCode = (code: string): code is ErrorCode => Object.hasOwn(ERROR_CATALOG, code)
+
+/**
+ * Codes that mean the data a plan read has changed. A replay under --confirm
+ * that fails with one reports `stale_confirmation`; any other code (config,
+ * access, an outage) keeps its own code, exit, and fix. List a new data code here.
+ */
+export const STATE_CODES: ReadonlySet<string> = new Set<ErrorCode>([
+  "resource_conflict",
+  "not_found",
+  "invalid_data",
+])
 
 /** Codes a command handler may raise (the ones with an `Errors.*` factory). */
 export type CommandErrorCode = {
@@ -58,7 +70,28 @@ export class AppError extends Schema.TaggedError<AppError>()("AppError", {
   next: Schema.optional(Schema.Array(NextAction)),
   /** Guide topics that build the model this failure assumes. Only for missing-MODEL failures. */
   guides: Schema.optional(Schema.Array(Schema.String)),
-}) {}
+}) {
+  /** The same failure, pointing at `guides`. */
+  withGuides(guides: ReadonlyArray<string>): AppError {
+    const { code, message, fix, transient, exit, details, next } = this
+    return new AppError({
+      code,
+      message,
+      fix,
+      transient,
+      exit,
+      guides,
+      ...(details !== undefined ? { details } : {}),
+      ...(next !== undefined ? { next } : {}),
+    })
+  }
+}
+
+export const isAppError = Schema.is(AppError)
+
+/** The message of anything thrown or died with. */
+export const messageOf = (cause: unknown): string =>
+  cause instanceof Error ? cause.message : String(cause)
 
 export interface ErrorInit {
   readonly message: string
@@ -66,7 +99,7 @@ export interface ErrorInit {
   readonly fix: string
   readonly details?: unknown
   /** The next move(s) as argv for this binary (no bin name), like confirmArgs. */
-  readonly next?: ReadonlyArray<NextActionType>
+  readonly next?: ReadonlyArray<NextAction>
   /**
    * Guide topics for a missing-MODEL failure (the agent needs to understand
    * something the surface cannot express). An error whose fix is complete

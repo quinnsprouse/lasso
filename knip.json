@@ -3,8 +3,29 @@
   "entry": [
     "scripts/*.mjs",
     ".claude/hooks/*.mjs",
+    ".claude/hooks/*.d.mts",
     "test/**/*.test.ts",
     "test/contract/type-fixtures.ts"
   ],
-  "project": ["src/**", "scripts/**", ".claude/hooks/**", "test/**"]
+  "project": ["src/**", "scripts/**", ".claude/hooks/**", "test/**"],
+  "include": [
+    "files",
+    "dependencies",
+    "devDependencies",
+    "optionalPeerDependencies",
+    "unlisted",
+    "binaries",
+    "unresolved",
+    "exports",
+    "types",
+    "nsExports",
+    "nsTypes",
+    "duplicates",
+    "enumMembers",
+    "namespaceMembers",
+    "catalog",
+    "catalogReferences",
+    "cycles"
+  ],
+  "treatConfigHintsAsErrors": true
 }

@@ -1,5 +1,6 @@
+import { describe, expect, it } from "@effect/vitest"
 import { Effect, Layer } from "effect"
-import { describe, expect, it } from "vitest"
+import { TestClock } from "effect/testing"
 import { Task } from "../../src/domain/task.ts"
 import { StoreReader, StoreWriter } from "../../src/services/store.ts"
 import { taskCreate } from "../../src/commands/task-create.ts"
@@ -8,7 +9,8 @@ import { taskCreate } from "../../src/commands/task-create.ts"
  * The service-layer pattern: plan runs against a fake StoreReader, apply
  * against a fake StoreWriter — no filesystem, no CLI process. The read/write
  * split is itself under test: plan cannot write because no writer exists in
- * its environment.
+ * its environment. `it.effect` runs each test under TestClock, so time is
+ * whatever the test sets.
  */
 
 const seed = (id: string, title: string) =>
@@ -24,12 +26,9 @@ const writerWith = (initial: ReadonlyArray<Task>) => {
     StoreWriter.of({
       modify: (transform) =>
         Effect.sync(() => {
-          const next = transform(states.at(-1)!)
-          if (next === null) {
-            return states.at(-1)!
-          }
-          states.push(next)
-          return next
+          const { next, result } = transform(states.at(-1)!)
+          if (next !== null) states.push(next)
+          return result
         }),
     }),
   )
@@ -38,94 +37,107 @@ const writerWith = (initial: ReadonlyArray<Task>) => {
 
 const input = (title: string, ifNotExists = false) => ({ title, ifNotExists })
 
+const createPlan = (ifExists: "fail" | "skip") => ({
+  action: "create_task" as const,
+  task: { id: "task_x", title: "X", status: "open" as const },
+  ifExists,
+})
+
 describe("task create plan", () => {
-  it("derives a deterministic, self-contained plan", async () => {
-    const plan = await Effect.runPromise(
-      taskCreate.plan(input("Write the docs")).pipe(Effect.provide(readerWith([]))),
-    )
-    expect(plan).toEqual({
-      action: "create_task",
-      task: { id: "task_write-the-docs", title: "Write the docs", status: "open" },
-    })
-  })
+  it.effect("derives a deterministic, self-contained plan", () =>
+    Effect.gen(function* () {
+      const plan = yield* taskCreate.plan(input("Write the docs"))
+      expect(plan).toEqual({
+        action: "create_task",
+        task: { id: "task_write-the-docs", title: "Write the docs", status: "open" },
+        ifExists: "fail",
+      })
+    }).pipe(Effect.provide(readerWith([]))),
+  )
 
-  it("models the --if-not-exists no-op in the plan itself", async () => {
-    const plan = await Effect.runPromise(
-      taskCreate
-        .plan(input("Dup", true))
-        .pipe(Effect.provide(readerWith([seed("task_dup", "Dup")]))),
-    )
-    expect(plan).toEqual({ action: "no_op", reason: "already_exists", taskId: "task_dup" })
-  })
+  it.effect("models the --if-not-exists no-op in the plan itself", () =>
+    Effect.gen(function* () {
+      const plan = yield* taskCreate.plan(input("Dup", true))
+      expect(plan).toEqual({ action: "no_op", reason: "already_exists", taskId: "task_dup" })
+    }).pipe(Effect.provide(readerWith([seed("task_dup", "Dup")]))),
+  )
 
-  it("rejects empty titles as invalid_data with a fix", async () => {
-    const error = await Effect.runPromise(
-      taskCreate.plan(input("   ")).pipe(Effect.flip, Effect.provide(readerWith([]))),
-    )
-    expect(error.code).toBe("invalid_data")
-    expect(error.exit).toBe(65)
-    expect(error.fix).toBeDefined()
-  })
+  it.effect("rejects empty titles as invalid_data with a fix", () =>
+    Effect.gen(function* () {
+      const error = yield* Effect.flip(taskCreate.plan(input("   ")))
+      expect(error.code).toBe("invalid_data")
+      expect(error.exit).toBe(65)
+      expect(error.fix).toBeDefined()
+    }).pipe(Effect.provide(readerWith([]))),
+  )
 
-  it("rejects a title that derives no identifier", async () => {
-    const error = await Effect.runPromise(
-      taskCreate.plan(input("日本語")).pipe(Effect.flip, Effect.provide(readerWith([]))),
-    )
-    expect(error.code).toBe("invalid_data")
-    expect(error.fix).toContain("ASCII")
-  })
+  it.effect("rejects a title that derives no identifier", () =>
+    Effect.gen(function* () {
+      const error = yield* Effect.flip(taskCreate.plan(input("日本語")))
+      expect(error.code).toBe("invalid_data")
+      expect(error.fix).toContain("ASCII")
+    }).pipe(Effect.provide(readerWith([]))),
+  )
 
-  it("conflicts at plan time when the task exists", async () => {
-    const error = await Effect.runPromise(
-      taskCreate
-        .plan(input("Dup"))
-        .pipe(Effect.flip, Effect.provide(readerWith([seed("task_dup", "Dup")]))),
-    )
-    expect(error.code).toBe("resource_conflict")
-    expect(error.transient).toBe(false)
-  })
+  it.effect("conflicts at plan time when the task exists", () =>
+    Effect.gen(function* () {
+      const error = yield* Effect.flip(taskCreate.plan(input("Dup")))
+      expect(error.code).toBe("resource_conflict")
+      expect(error.transient).toBe(false)
+    }).pipe(Effect.provide(readerWith([seed("task_dup", "Dup")]))),
+  )
 })
 
 describe("task create apply", () => {
-  it("persists exactly the planned task", async () => {
+  it.effect("persists exactly the planned task", () => {
     const { layer, states } = writerWith([])
-    const result = await Effect.runPromise(
-      taskCreate
-        .apply({
-          action: "create_task",
-          task: { id: "task_x", title: "X", status: "open" },
-        })
-        .pipe(Effect.provide(layer)),
-    )
-    expect(result.created).toBe(true)
-    expect(states.at(-1)!.map((task) => task.id)).toEqual(["task_x"])
+    return Effect.gen(function* () {
+      const result = yield* taskCreate.apply(createPlan("fail"))
+      expect(result.created).toBe(true)
+      expect(states.at(-1)!.map((task) => task.id)).toEqual(["task_x"])
+    }).pipe(Effect.provide(layer))
   })
 
-  it("executes a no_op plan without changing state", async () => {
+  it.effect("stamps createdAt at apply time, from the clock", () => {
+    const { layer } = writerWith([])
+    return Effect.gen(function* () {
+      yield* TestClock.setTime(Date.parse("2026-03-04T05:06:07.000Z"))
+      const result = yield* taskCreate.apply(createPlan("fail"))
+      expect(result.task.createdAt).toBe("2026-03-04T05:06:07.000Z")
+    }).pipe(Effect.provide(layer))
+  })
+
+  it.effect("executes a no_op plan without changing state", () => {
     const { layer, states } = writerWith([seed("task_idem", "Idem")])
-    const result = await Effect.runPromise(
-      taskCreate
-        .apply({ action: "no_op", reason: "already_exists", taskId: "task_idem" })
-        .pipe(Effect.provide(layer)),
-    )
-    expect(result.created).toBe(false)
-    expect(result.task.id).toBe("task_idem")
-    // No write at all: the transform returned null, so the store kept its identity.
-    expect(states.length).toBe(1)
+    return Effect.gen(function* () {
+      const result = yield* taskCreate.apply({
+        action: "no_op",
+        reason: "already_exists",
+        taskId: "task_idem",
+      })
+      expect(result.created).toBe(false)
+      expect(result.task.id).toBe("task_idem")
+      // No write at all: the transform returned null, so the store kept its identity.
+      expect(states.length).toBe(1)
+    }).pipe(Effect.provide(layer))
   })
 
-  it("reports a conflict when another process created the task after planning", async () => {
+  it.effect("with --if-not-exists, losing a race to another writer is the promised no-op", () => {
     const { layer, states } = writerWith([seed("task_x", "X")])
-    const error = await Effect.runPromise(
-      taskCreate
-        .apply({
-          action: "create_task",
-          task: { id: "task_x", title: "X", status: "open" },
-        })
-        .pipe(Effect.flip, Effect.provide(layer)),
-    )
-    expect(error.code).toBe("resource_conflict")
-    // A rejected mutation performs no write at all.
-    expect(states.length).toBe(1)
+    return Effect.gen(function* () {
+      const result = yield* taskCreate.apply(createPlan("skip"))
+      expect(result).toEqual({ created: false, task: seed("task_x", "X") })
+      expect(states.length).toBe(1)
+    }).pipe(Effect.provide(layer))
+  })
+
+  it.effect("reports a conflict when another process created the task after planning", () => {
+    const { layer, states } = writerWith([seed("task_x", "X")])
+    return Effect.gen(function* () {
+      const error = yield* Effect.flip(taskCreate.apply(createPlan("fail")))
+      expect(error.code).toBe("resource_conflict")
+      // A rejected mutation performs no write at all.
+      expect(states.length).toBe(1)
+    }).pipe(Effect.provide(layer))
   })
 })

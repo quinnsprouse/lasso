@@ -121,25 +121,29 @@ interface ContractBase<P extends Record<string, ParamSpec>> {
   readonly guides?: ReadonlyArray<GuideTopic>
 }
 
-interface Collection {
+interface Collection<I> {
   /** The projectable field inventory — static, never derived from data. */
   readonly fields: readonly [string, ...Array<string>]
-  /** Extracts rows from the ENCODED output, so JSON and NDJSON agree. */
-  readonly items: (encoded: unknown) => ReadonlyArray<Record<string, unknown>>
+  /**
+   * Extracts rows from the ENCODED output (typed by `dataSchema`'s encoded
+   * side), so JSON, NDJSON, and projection agree.
+   */
+  readonly items: (encoded: I) => ReadonlyArray<Record<string, unknown>>
 }
 
 export interface QueryContract<
   P extends Record<string, ParamSpec> = Record<string, ParamSpec>,
   A = unknown,
   R = never,
+  I = unknown,
 > extends ContractBase<P> {
   readonly kind: "query"
-  readonly dataSchema: Schema.Codec<A, unknown>
+  readonly dataSchema: Schema.Codec<A, I>
   readonly handler: (input: InputOf<P>) => Effect.Effect<A, AppError, R>
   /** Human rendering for text mode; JSON pretty-print when omitted. */
   readonly renderText?: (data: A) => string
   /** Declare for collection outputs: enables NDJSON item events and --fields. */
-  readonly collection?: Collection
+  readonly collection?: Collection<I>
   /**
    * The agent's next move(s) after a success: pure, synchronous, at most
    * three, each an argv for this binary. The runtime validates them against
@@ -180,7 +184,7 @@ export interface MutationContract<
 
 // biome-ignore format: readability
 export type AnyContract =
-  | QueryContract<any, any, any>
+  | QueryContract<any, any, any, any>
   | MutationContract<any, any, any, any, any>
 
 export interface Capabilities {
@@ -202,9 +206,9 @@ export const capabilitiesOf = (contract: AnyContract): Capabilities =>
         idempotency: { kind: "always" },
       }
 
-export const defineQuery = <const P extends Record<string, ParamSpec>, A, R = never>(
-  contract: Omit<QueryContract<P, A, R>, "kind">,
-): QueryContract<P, A, R> => ({ kind: "query", ...contract })
+export const defineQuery = <const P extends Record<string, ParamSpec>, A, R = never, I = unknown>(
+  contract: Omit<QueryContract<P, A, R, I>, "kind">,
+): QueryContract<P, A, R, I> => ({ kind: "query", ...contract })
 
 export const defineMutation = <
   const P extends Record<string, ParamSpec>,

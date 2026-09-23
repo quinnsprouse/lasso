@@ -1,4 +1,14 @@
-import { mkdtemp, readFile, rm } from "node:fs/promises"
+import {
+  chmod,
+  mkdir,
+  mkdtemp,
+  readdir,
+  readFile,
+  rm,
+  stat,
+  utimes,
+  writeFile,
+} from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { NodeServices } from "@effect/platform-node"
@@ -49,10 +59,14 @@ const load = Effect.gen(function* () {
   return yield* reader.load
 }).pipe(Effect.provide(layer))
 
+/** Writes what `transform` returns (null: no write) and returns the tasks after it. */
 const modify = (transform: (tasks: ReadonlyArray<Task>) => ReadonlyArray<Task> | null) =>
   Effect.gen(function* () {
     const writer = yield* StoreWriter
-    return yield* writer.modify(transform)
+    return yield* writer.modify((tasks) => {
+      const next = transform(tasks)
+      return { next, result: next ?? tasks }
+    })
   }).pipe(Effect.provide(layer))
 
 const seed = (id: string) =>
@@ -70,8 +84,6 @@ describe("store", () => {
 
     const tasks = await Effect.runPromise(load)
     expect(tasks.map((task) => task.id)).toEqual(["task_a"])
-
-    const { readdir } = await import("node:fs/promises")
     const files = await readdir(join(dir, ".lasso"))
     expect(files).toEqual(["tasks.json"])
   })
@@ -84,7 +96,6 @@ describe("store", () => {
   })
 
   it("classifies invalid JSON as invalid_config with a fix", async () => {
-    const { mkdir, writeFile } = await import("node:fs/promises")
     await mkdir(join(dir, ".lasso"), { recursive: true })
     await writeFile(join(dir, ".lasso", "tasks.json"), "not json")
     const error = await Effect.runPromise(load.pipe(Effect.flip))
@@ -93,11 +104,25 @@ describe("store", () => {
   })
 
   it("classifies schema-mismatched content as invalid_config", async () => {
-    const { mkdir, writeFile } = await import("node:fs/promises")
     await mkdir(join(dir, ".lasso"), { recursive: true })
     await writeFile(join(dir, ".lasso", "tasks.json"), JSON.stringify({ tasks: [{ id: 1 }] }))
     const error = await Effect.runPromise(load.pipe(Effect.flip))
     expect(error.code).toBe("invalid_config")
+  })
+
+  it("rejects fields this version does not know instead of dropping them on the next write", async () => {
+    await mkdir(join(dir, ".lasso"), { recursive: true })
+    const task = { id: "task_a", title: "A", status: "open", createdAt: "x", priority: 5 }
+    await writeFile(join(dir, ".lasso", "tasks.json"), JSON.stringify({ tasks: [task] }))
+    const error = await Effect.runPromise(load.pipe(Effect.flip))
+    expect(error.code).toBe("invalid_config")
+  })
+
+  it("a .lasso that is not a directory is a misconfiguration with a structural fix", async () => {
+    await writeFile(join(dir, ".lasso"), "not a directory")
+    const error = await Effect.runPromise(load.pipe(Effect.flip))
+    expect(error.code).toBe("invalid_config")
+    expect(error.fix).toContain("must be a directory")
   })
 
   it("releases the lock even when the transform throws through encode", async () => {
@@ -116,7 +141,6 @@ describe("store", () => {
 describe("store concurrency and no-ops", () => {
   it("a null transform performs no write: file identity is untouched", async () => {
     await Effect.runPromise(modify(() => [seed("task_a")]))
-    const { stat } = await import("node:fs/promises")
     const before = await stat(join(dir, ".lasso", "tasks.json"))
 
     const result = await Effect.runPromise(modify(() => null))
@@ -128,16 +152,35 @@ describe("store concurrency and no-ops", () => {
   })
 
   it("contention on the advisory lock surfaces as transient_failure", async () => {
-    const { mkdir } = await import("node:fs/promises")
     await mkdir(join(dir, ".lasso", "tasks.lock"), { recursive: true })
     const error = await Effect.runPromise(modify(() => [seed("task_a")]).pipe(Effect.flip))
     expect(error.code).toBe("transient_failure")
     expect(error.transient).toBe(true)
-    expect(error.fix).toContain("tasks.lock")
+  })
+
+  it("a writer queued behind another stays interruptible (Ctrl-C, SIGTERM)", async () => {
+    await mkdir(join(dir, ".lasso", "tasks.lock"), { recursive: true })
+    const started = Date.now()
+    const exit = await Effect.runPromiseExit(
+      modify(() => [seed("task_a")]).pipe(Effect.timeout("100 millis")),
+    )
+    expect(exit._tag).toBe("Failure")
+    // The contention window is about a second; interruption must not wait it out.
+    expect(Date.now() - started).toBeLessThan(600)
+  })
+
+  it("a lock abandoned by a killed process is not transient: retrying cannot clear it", async () => {
+    const lock = join(dir, ".lasso", "tasks.lock")
+    await mkdir(lock, { recursive: true })
+    const minuteAgo = new Date(Date.now() - 60_000)
+    await utimes(lock, minuteAgo, minuteAgo)
+    const error = await Effect.runPromise(modify(() => [seed("task_a")]).pipe(Effect.flip))
+    expect(error.code).toBe("cannot_write")
+    expect(error.transient).toBe(false)
+    expect(error.fix).toContain("rm -r .lasso/tasks.lock")
   })
 
   it("an unwritable state directory fails immediately as cannot_write", async () => {
-    const { chmod, mkdir } = await import("node:fs/promises")
     await mkdir(join(dir, ".lasso"), { recursive: true })
     await chmod(join(dir, ".lasso"), 0o500)
     const started = Date.now()

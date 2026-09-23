@@ -1,4 +1,5 @@
 import { validateGlobalFlags } from "../contract/invocation.ts"
+import { ENVIRONMENT } from "../settings.ts"
 
 /**
  * Format negotiation happens BEFORE command parsing so that even a parse
@@ -88,18 +89,20 @@ export const negotiate = (options: NegotiateOptions): OutputMode => {
     }
   }
 
-  const distinct = [...new Set(explicit)]
-  let format = distinct[0]
-  if (error === undefined && distinct.length > 1) {
-    error = `conflicting output formats: ${distinct.join(", ")}`
+  // `auto` defers to any concrete format; two concrete ones conflict.
+  const concrete = [...new Set(explicit.filter((value) => value !== "auto"))]
+  let format = concrete[0] ?? explicit[0]
+  if (error === undefined && concrete.length > 1) {
+    error = `conflicting output formats: ${concrete.join(", ")}`
   }
 
-  const envFormat = options.env["LASSO_FORMAT"]
+  // An empty variable is unset, as CI systems often export them.
+  const envFormat = options.env[ENVIRONMENT.format.name] || undefined
   if (format === undefined && envFormat !== undefined) {
     if (isFormat(envFormat)) {
       format = envFormat
     } else if (error === undefined) {
-      error = `invalid LASSO_FORMAT value "${envFormat}"`
+      error = `invalid ${ENVIRONMENT.format.name} value "${envFormat}"`
     }
   }
 
@@ -126,6 +129,8 @@ export const negotiate = (options: NegotiateOptions): OutputMode => {
     throw new FormatNegotiationError(error, mode)
   }
   const tokens = rest.slice(0, rest.includes("--") ? rest.indexOf("--") : rest.length)
+  // The parser starts an action when its flag appears in any spelling, even
+  // `--no-wizard` or `--wizard=false`, so every spelling counts as a request.
   const hasAction = (name: string, negated = false) =>
     tokens.some((arg) =>
       new RegExp(`^(${name}${negated ? `|--no-${name.slice(2)}` : ""})(=.*)?$`).test(arg),

@@ -1,9 +1,10 @@
 # Adding commands
 
-Start with the generator — it scaffolds a query, registers it, formats, records the surface snapshot, and leaves the Fast profile green (the Starter Contract proves this on every CI run). For a mutation, generate the skeleton and replace `defineQuery` with `defineMutation` (AGENTS.md, "Changing the surface", lists the full steps):
+Start with the generator — it scaffolds a command, registers it, formats, records the surface snapshot, and leaves the Fast profile green (the Starter Contract proves this for both kinds on every CI run). `--mutation` scaffolds `defineMutation` and adds its plan fixture (AGENTS.md, "Changing the surface", lists the remaining steps):
 
 ```bash
-node scripts/new-command.mjs task ping     # creates src/commands/task-ping.ts, registers it
+node scripts/new-command.mjs task ping                 # query: src/commands/task-ping.ts, registered
+node scripts/new-command.mjs task archive --mutation   # mutation, plus its case in test/fixtures/mutations.ts
 npm run check
 ```
 
@@ -65,7 +66,7 @@ Rules enforced mechanically (type system where possible, contract-invariant test
 - Framework flags (`--dry-run`, `--confirm`, `--yes`, `--fields`) and error codes are added by the runtime and appear in `describe` automatically — never redeclare them. Reserved aliases: `h`, `v`, `y`.
 - Choice params declare `choices`; boolean flags cannot have defaults; arguments take no alias/default. All of these fail `tsc` (see `test/contract/type-fixtures.ts`).
 - Param keys are lowerCamelCase; summaries are at most 88 characters; every example starts with the bin name (invariant tests).
-- Contradictory controls (`--dry-run` with `--yes`/`--confirm`) are rejected by the runtime before planning.
+- Contradictory controls (`--dry-run` with `--yes`/`--confirm`) are rejected by the runtime before planning, and so is any flag given twice, including `--yes --no-yes`.
 
 ## Errors
 
@@ -86,8 +87,16 @@ Handlers fail only with `AppError` (the handler type enforces that); command cod
 
 The runtime alone produces `internal_error` (exit 70, a defect) and `interrupted` (exit 130, transient). This table is pinned by the `error catalog` invariants.
 
-`Errors.*` also accept `next` (executable continuations) and `guides` (topics, for missing-MODEL failures; an error whose `fix` is complete declares none of its own and still inherits its command's). `fix` is required by the factory type and by the wire schema: an exact command or action, e.g. `` fix: `re-run with --if-not-exists` ``. To add an expected error code end to end: add the `ERROR_CATALOG` row and the explicit `Errors.*` factory in `src/errors.ts`, add the row to the table above (the `error catalog` invariants parse this table and check every factory against it), declare the code in each producing contract's `domainErrorCodes`, then run `npm run surface:update`. `ErrorCode`, the exit and transience lookup, and `describe` derive from the catalog; the named factory does not.
+`Errors.*` also accept `next` (executable continuations) and `guides` (topics, for missing-MODEL failures; an error whose `fix` is complete declares none of its own and still inherits its command's). `fix` is required by the factory type and by the wire schema: an exact command or action, e.g. `` fix: `re-run with --if-not-exists` ``. To add an expected error code end to end: add the `ERROR_CATALOG` row and the explicit `Errors.*` factory in `src/errors.ts` (list it in `STATE_CODES` too when it means the data a plan read has changed, so a `--confirm` replay reports it as `stale_confirmation`), add the row to the table above (the `error catalog` invariants parse this table and check every factory against it), declare the code in each producing contract's `domainErrorCodes`, then run `npm run surface:update`. `ErrorCode`, the exit and transience lookup, and `describe` derive from the catalog; the named factory does not.
 
 ## Services
 
 Handlers reach the world through services (`src/services/`), never `node:fs`, `process`, or Effect's `Console` (lint blocks all three; narrate through the `Progress` service). Define a service with `Context.Service`, give it a production `layer`, add it to the capability unions and merge its layer into `appServicesLayer` in `src/services/index.ts`. Tests provide fake layers — see `test/unit/task-create.test.ts`.
+
+### Settings
+
+Every environment variable lives in `ENVIRONMENT` in `src/settings.ts`, which `describe` publishes as `protocol.environment`. Read a value through an Effect `Config` wrapped by `setting(...)`, at the point of use: a malformed value fails that one command as `invalid_config` with a fix naming the variable, and introspection never depends on configuration. Secrets use `Config.Redacted`, so they cannot print. Tests supply values with `ConfigProvider.layer(ConfigProvider.fromUnknown({ … }))`.
+
+### Calling an API
+
+Follow `src/services/feed.ts`. Set the client's middleware once in the layer (`HttpClient.mapRequest(HttpClientRequest.acceptJson)`, `HttpClient.filterStatusOk`, `HttpClient.retryTransient` with a bounded, jittered schedule), bound each call with `Effect.timeout`, decode the body with a schema, and map failures with `httpFailure` from `src/services/http.ts`. Its mapping keeps `transient` truthful: timeouts, network failures, 408, 429, and 5xx are transient; 401/403 is `auth_failure`, 404/410 is `not_found`. `FetchHttpClient.layer` (Node's built-in fetch) is provided in `appServicesLayer`, so the bundle needs no HTTP dependency; tests provide `HttpClient.make(...)` fakes (see `test/unit/feed.test.ts`). A remote read belongs in `plan`, and the plan carries what it read, so a confirmed mutation applies exactly what was previewed.

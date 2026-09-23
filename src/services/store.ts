@@ -1,4 +1,16 @@
-import { Clock, Context, Effect, FileSystem, Layer, Path, Schedule, Schema } from "effect"
+import type { PlatformError } from "effect"
+import {
+  Clock,
+  Context,
+  Data,
+  Effect,
+  FileSystem,
+  Layer,
+  Option,
+  Path,
+  Schedule,
+  Schema,
+} from "effect"
 import { AppError, Errors } from "../errors.ts"
 import { Task } from "../domain/task.ts"
 
@@ -7,51 +19,59 @@ const StoreFile = Schema.Struct({
 })
 
 const StoreFileJson = Schema.fromJsonString(StoreFile)
-const decodeStore = Schema.decodeEffect(StoreFileJson)
+// Strict: a field this version does not know would be dropped by the next write.
+const decodeStore = Schema.decodeEffect(StoreFileJson, { onExcessProperty: "error" })
 const encodeStore = Schema.encodeEffect(StoreFileJson)
 
 export interface StoreReaderApi {
   readonly load: Effect.Effect<ReadonlyArray<Task>, AppError>
 }
 
+/**
+ * What a transform decides inside the lock: the tasks to write (null leaves
+ * the file untouched) and the result `modify` returns to the caller.
+ */
+interface Change<A> {
+  readonly next: ReadonlyArray<Task> | null
+  readonly result: A
+}
+
 export interface StoreWriterApi {
-  /** Atomic read-transform-write under a lock. Return null to leave the file untouched. */
-  readonly modify: (
-    transform: (tasks: ReadonlyArray<Task>) => ReadonlyArray<Task> | null,
-  ) => Effect.Effect<ReadonlyArray<Task>, AppError>
+  /** Atomic read-decide-write under a lock; the decision comes back as `result`. */
+  readonly modify: <A>(
+    transform: (tasks: ReadonlyArray<Task>) => Change<A>,
+  ) => Effect.Effect<A, AppError>
 }
 
 const DIR = ".lasso"
 const FILE = "tasks.json"
 const LOCK = "tasks.lock"
+const STALE_LOCK_MILLIS = 30_000
 
 const WRITE_FIX = `check write permissions on ${DIR}/ in the current directory, or run from a writable directory`
-const READ_FIX = `check read permissions on ${DIR}/${FILE}, or run from the directory that owns the store`
 
-const asCannotWrite = (what: string) => (cause: { message: string }) =>
+const asCannotWrite = (what: string) => (cause: PlatformError.PlatformError) =>
   Errors.cannotWrite({ message: `cannot ${what}: ${cause.message}`, fix: WRITE_FIX })
 
-// Uniquifies temp files within one process; the lock serializes across processes.
-let tmpCounter = 0
+// A store that cannot be read is a misconfigured environment, not a failed write.
+const asUnreadable = (what: string) => (cause: PlatformError.PlatformError) =>
+  Errors.invalidConfig({
+    message: `cannot ${what}: ${cause.message}`,
+    fix:
+      cause.reason._tag === "PermissionDenied"
+        ? `grant read permission on ${DIR}/${FILE}, or run from the directory that owns the store`
+        : `${DIR} must be a directory holding ${FILE}: move aside whatever is at ${DIR}`,
+  })
+
+/** Another writer holds the lock: retried, never surfaced as-is. */
+class LockBusy extends Data.TaggedError("LockBusy") {}
 
 const loadFrom = Effect.fn("store.load")(function* (fs: FileSystem.FileSystem, file: string) {
-  const exists = yield* fs
-    .exists(file)
-    .pipe(
-      Effect.mapError((cause) =>
-        Errors.cannotWrite({ message: `cannot access ${file}: ${cause.message}`, fix: READ_FIX }),
-      ),
-    )
+  const exists = yield* fs.exists(file).pipe(Effect.mapError(asUnreadable(`access ${file}`)))
   if (!exists) {
     return []
   }
-  const raw = yield* fs
-    .readFileString(file)
-    .pipe(
-      Effect.mapError((cause) =>
-        Errors.cannotWrite({ message: `cannot read ${file}: ${cause.message}`, fix: READ_FIX }),
-      ),
-    )
+  const raw = yield* fs.readFileString(file).pipe(Effect.mapError(asUnreadable(`read ${file}`)))
   const decoded = yield* decodeStore(raw).pipe(
     Effect.mapError((cause) =>
       Errors.invalidConfig({
@@ -88,43 +108,56 @@ export class StoreWriter extends Context.Service<StoreWriter, StoreWriterApi>()(
         const path = yield* Path.Path
         const file = path.join(DIR, FILE)
         const lock = path.join(DIR, LOCK)
+        // One name is enough: the lock admits one writer at a time, and a temp
+        // file a killed writer left behind is overwritten by the next write.
+        const tmp = `${file}.tmp`
 
-        // Exclusive directory creation serializes concurrent writers.
+        // A live holder keeps the lock for milliseconds. One this old was left by
+        // a killed process: retrying cannot help, so fail at once, not transient.
+        const lockHeld = Effect.gen(function* () {
+          const info = yield* fs.stat(lock).pipe(Effect.option)
+          const now = yield* Clock.currentTimeMillis
+          const age = Option.match(
+            Option.flatMap(info, (stat) => stat.mtime),
+            { onNone: () => 0, onSome: (mtime) => now - mtime.getTime() },
+          )
+          return yield* age > STALE_LOCK_MILLIS
+            ? Errors.cannotWrite({
+                message: `the task store lock ${lock} is ${Math.round(age / 1000)}s old; its process exited without releasing it`,
+                fix: `confirm no other ${DIR} writer is running, then remove the lock: rm -r ${lock}`,
+              })
+            : Effect.fail(new LockBusy())
+        })
+
+        // Exclusive directory creation serializes concurrent writers. One attempt
+        // only: acquire runs uninterruptibly, so waiting for the lock belongs
+        // outside it (see modify).
         const acquireLock = Effect.gen(function* () {
           yield* fs
             .makeDirectory(DIR, { recursive: true })
             .pipe(Effect.mapError(asCannotWrite(`create ${DIR}`)))
-          // Retry contention only; permission failures should fail immediately.
-          yield* fs.makeDirectory(lock).pipe(
-            Effect.retry({
-              schedule: Schedule.spaced("25 millis"),
-              times: 40,
-              while: (error) => error.reason._tag === "AlreadyExists",
-            }),
-            Effect.mapError((error) =>
-              error.reason._tag === "AlreadyExists"
-                ? Errors.transientFailure({
-                    message: "the task store is locked by another process",
-                    fix: `retry; if it persists, remove the stale ${lock} directory`,
-                  })
-                : Errors.cannotWrite({
-                    message: `cannot create ${lock}: ${error.message}`,
-                    fix: WRITE_FIX,
-                  }),
-            ),
-          )
+          yield* fs
+            .makeDirectory(lock)
+            .pipe(
+              Effect.catch((error) =>
+                error.reason._tag === "AlreadyExists"
+                  ? lockHeld
+                  : Effect.fail(asCannotWrite(`create ${lock}`)(error)),
+              ),
+            )
         })
 
         const releaseLock = fs.remove(lock, { recursive: true }).pipe(Effect.ignore)
 
-        const modify: StoreWriterApi["modify"] = (transform) =>
-          Effect.acquireUseRelease(
+        const modify: StoreWriterApi["modify"] = Effect.fn("StoreWriter.modify")(function* <A>(
+          transform: (tasks: ReadonlyArray<Task>) => Change<A>,
+        ) {
+          return yield* Effect.acquireUseRelease(
             acquireLock,
-            Effect.fn("store.modify")(function* () {
-              const current = yield* loadFrom(fs, file)
-              const next = transform(current)
+            Effect.fn("StoreWriter.modify.use")(function* () {
+              const { next, result } = transform(yield* loadFrom(fs, file))
               if (next === null) {
-                return current
+                return result
               }
               const encoded = yield* encodeStore({ tasks: next }).pipe(
                 Effect.mapError((cause) =>
@@ -134,17 +167,34 @@ export class StoreWriter extends Context.Service<StoreWriter, StoreWriterApi>()(
                   }),
                 ),
               )
-              const stamp = yield* Clock.currentTimeMillis
-              tmpCounter += 1
-              const tmp = `${file}.${stamp.toString(36)}.${tmpCounter}.tmp`
-              yield* fs
-                .writeFileString(tmp, `${encoded}\n`)
-                .pipe(Effect.mapError(asCannotWrite(`write ${tmp}`)))
-              yield* fs.rename(tmp, file).pipe(Effect.mapError(asCannotWrite(`replace ${file}`)))
-              return next
+              yield* fs.writeFileString(tmp, `${encoded}\n`).pipe(
+                Effect.mapError(asCannotWrite(`write ${tmp}`)),
+                Effect.andThen(
+                  fs.rename(tmp, file).pipe(Effect.mapError(asCannotWrite(`replace ${file}`))),
+                ),
+                // A failed or interrupted write leaves no temp file behind.
+                Effect.onError(() => fs.remove(tmp).pipe(Effect.ignore)),
+              )
+              return result
             }),
             () => releaseLock,
+          ).pipe(
+            // Retry contention only, between attempts, where Ctrl-C and SIGTERM
+            // can still interrupt a writer queued behind another one.
+            Effect.retry({
+              // Jitter spreads writers that collided so they do not collide again.
+              schedule: Schedule.spaced("25 millis").pipe(Schedule.jittered),
+              times: 40,
+              while: (error) => error._tag === "LockBusy",
+            }),
+            Effect.catchTag("LockBusy", () =>
+              Errors.transientFailure({
+                message: "the task store is locked by another process",
+                fix: "retry the command",
+              }),
+            ),
           )
+        })
 
         return StoreWriter.of({ modify })
       }),

@@ -29,6 +29,7 @@ When a row names a guide topic, fetch it before that flow's first command, once 
 | Automate a mutation beyond one `--yes` | preview, then replay `confirmArgs` | `mutation-replay` |
 | A create conflicts with existing state | follow `next` | `task-ids`, `mutation-replay` |
 | Check the store for duplicates | `lasso task audit --format ndjson` | — |
+| Import tasks from a JSON feed | `lasso task import <url> --dry-run --json` | `task-ids` |
 | Find a guide for anything else | `lasso guide list --json` | — |
 
 Never run topic names as commands.

@@ -1,11 +1,19 @@
 import { isGuideTopic } from "../guides/catalog.ts"
-import type { Guidance, NextAction } from "../output/guidance.ts"
+import type { OutputMode } from "../output/format.ts"
+import type { NextAction } from "../output/guidance.ts"
 import { NEXT_LIMIT } from "../output/guidance.ts"
+import type { Outcome } from "../output/outcome.ts"
 import { BOOLEAN_LITERALS } from "./invocation.ts"
 import { Effect } from "effect"
 
+/** The reason an argv would fail against the surface, or undefined when it parses. */
+export type Validate<R> = (
+  args: ReadonlyArray<string>,
+) => Effect.Effect<string | undefined, never, R>
+
 /**
- * Validates and bounds point-of-use guidance before it reaches the wire.
+ * An outcome's point-of-use guidance, validated and bounded before it reaches
+ * the wire.
  *
  * - Every `next` action must be a real invocation of this CLI (command path,
  *   declared flags, positional arity). Invalid ones are dropped and reported
@@ -16,17 +24,14 @@ import { Effect } from "effect"
  *   same way (contracts cannot produce one — the GuideTopic union stops them —
  *   but a hand-built AppError could).
  */
-export const finalizeGuidance = Effect.fn("finalizeGuidance")(function* <R>(
-  validate: (args: ReadonlyArray<string>) => Effect.Effect<string | undefined, never, R>,
-  input: {
-    readonly next?: ReadonlyArray<NextAction> | undefined
-    readonly guides?: ReadonlyArray<string> | undefined
-  },
-): Effect.fn.Return<Guidance & { readonly warnings: ReadonlyArray<string> }, never, R> {
+export const finalizeGuidance = Effect.fn("finalizeGuidance")(function* <O extends Outcome, R>(
+  validate: Validate<R>,
+  outcome: O,
+): Effect.fn.Return<O, never, R> {
   const warnings: Array<string> = []
   const next: Array<NextAction> = []
   const seen = new Set<string>()
-  for (const action of input.next ?? []) {
+  for (const action of outcome.next ?? []) {
     // oxlint-disable-next-line effecttsgo/prefer-schema-over-json -- argv serialization is a deduplication key
     const key = JSON.stringify(action.args)
     if (seen.has(key)) {
@@ -45,7 +50,7 @@ export const finalizeGuidance = Effect.fn("finalizeGuidance")(function* <R>(
     next.push(action)
   }
   const guides: Array<string> = []
-  for (const topic of input.guides ?? []) {
+  for (const topic of outcome.guides ?? []) {
     if (guides.includes(topic)) {
       continue
     }
@@ -55,8 +60,22 @@ export const finalizeGuidance = Effect.fn("finalizeGuidance")(function* <R>(
     }
     guides.push(topic)
   }
-  return { next, guides, warnings }
+  return { ...outcome, next, guides, warnings: [...(outcome.warnings ?? []), ...warnings] }
 })
+
+/**
+ * The invocation as a fresh preview: every mutation control removed, the
+ * negotiated machine format kept. A re-plan, an interrupt, and a corrected
+ * guess all offer this, so no generated move ever applies a change.
+ */
+export const previewArgs = (
+  argv: ReadonlyArray<string>,
+  format: OutputMode["format"],
+): ReadonlyArray<string> =>
+  withMachineFormat(
+    withoutFlag(withoutFlag(withoutFlag(argv, "--confirm", true), "--yes"), "-y"),
+    formatArgs(format),
+  )
 
 /** The machine-format flag a replay must carry so it stays machine-readable under a TTY. */
 export const formatArgs = (format: "json" | "ndjson" | "text"): ReadonlyArray<string> =>
@@ -75,6 +94,23 @@ export const withMachineFormat = (
   return terminator === -1
     ? [...argv, ...machine]
     : [...argv.slice(0, terminator), ...machine, ...argv.slice(terminator)]
+}
+
+/**
+ * argv with the first occurrence of `token` before any `--` terminator
+ * replaced by `replacement`. A flag token also matches its inline form
+ * (`--stauts=all` → `--status=all`). Undefined when the token is absent.
+ */
+export const withReplacedToken = (
+  argv: ReadonlyArray<string>,
+  token: string,
+  replacement: string,
+): ReadonlyArray<string> | undefined => {
+  const terminator = argv.indexOf("--")
+  const at = (terminator === -1 ? argv : argv.slice(0, terminator)).findIndex(
+    (arg) => arg === token || (token.startsWith("-") && arg.startsWith(`${token}=`)),
+  )
+  return at === -1 ? undefined : argv.with(at, `${replacement}${argv[at]!.slice(token.length)}`)
 }
 
 /**

@@ -29,7 +29,13 @@ describe("task list", () => {
   })
 
   it("extracts collection rows from the encoded payload", () => {
-    const rows = taskList.collection!.items({ items: [{ id: "task_a" }] })
-    expect(rows).toEqual([{ id: "task_a" }])
+    const row = {
+      id: "task_a",
+      title: "A",
+      status: "open" as const,
+      createdAt: "2026-01-01T00:00:00.000Z",
+    }
+    const rows = taskList.collection!.items({ items: [row], count: 1 })
+    expect(rows).toEqual([row])
   })
 })
