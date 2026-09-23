@@ -1,4 +1,4 @@
-import { Effect, Layer, Stdio } from "effect"
+import { Effect, Layer, Sink, Stdio } from "effect"
 import { describe, expect, it } from "vitest"
 import type { OutputMode } from "../../src/output/format.ts"
 import { Renderer } from "../../src/output/renderer.ts"
@@ -21,8 +21,9 @@ const mode: OutputMode = {
 
 const withRenderer = <A>(
   body: (renderer: Renderer["Service"]) => Effect.Effect<A, unknown>,
+  stdio: Partial<Stdio.Stdio> = {},
 ): Promise<A> => {
-  const environment = testPlatform(Stdio.layerTest({}))
+  const environment = testPlatform(Stdio.layerTest(stdio))
   return Effect.runPromise(
     Effect.gen(function* () {
       const renderer = yield* Renderer
@@ -32,6 +33,32 @@ const withRenderer = <A>(
     ) as Effect.Effect<A>,
   )
 }
+
+describe("a closed stdout", () => {
+  // The Stdio service wraps the native error: { _tag, reason, cause: { code: "EPIPE" } }.
+  const native = Object.assign(new Error("write EPIPE"), { code: "EPIPE" })
+  const wrapped = Object.assign(new Error("SystemError: write failed"), {
+    _tag: "PlatformError",
+    reason: { _tag: "Unknown" },
+    cause: native,
+  })
+
+  it.each([native, wrapped])("ends writing without failing (%s)", async (error) => {
+    const exit = await withRenderer(
+      (renderer) => Effect.exit(renderer.emit({ kind: "ok", data: {} })),
+      { stdout: () => Sink.fail(error) as never },
+    )
+    expect(exit._tag).toBe("Success")
+  })
+
+  it("any other write failure is still a defect", async () => {
+    const exit = await withRenderer(
+      (renderer) => Effect.exit(renderer.emit({ kind: "ok", data: {} })),
+      { stdout: () => Sink.fail(new Error("disk full")) as never },
+    )
+    expect(exit._tag).toBe("Failure")
+  })
+})
 
 describe("renderer terminal latch", () => {
   it("progress after emit is a defect", async () => {

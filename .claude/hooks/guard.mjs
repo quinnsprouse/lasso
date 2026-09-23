@@ -3,24 +3,18 @@
 // Shell programs are outside this hook's scope. Git hooks and CI run the checks.
 import { readFileSync } from "node:fs"
 import { basename, relative, resolve, sep } from "node:path"
+import { pathToFileURL } from "node:url"
 import { repoRoot, workspaceFrom } from "../../scripts/lib/toolchain.mjs"
 
-let input
-try {
-  input = JSON.parse(readFileSync(0, "utf8"))
-} catch {
-  process.exit(0)
-}
-const root = workspaceFrom(input?.cwd) ?? repoRoot
-// Where a relative path in the command resolves: the shell's cwd, not the root.
-const cwd = typeof input?.cwd === "string" ? input.cwd : root
 // macOS and Windows file systems ignore case: `.GIT` is `.git` there.
 const fold = ["darwin", "win32"].includes(process.platform)
   ? (path) => path.toLowerCase()
   : (path) => path
+
+/** A refusal: the hook exits 2 with the reason and its fix on stderr. */
+class Refusal extends Error {}
 const deny = (reason, fix) => {
-  process.stderr.write(`guard: ${reason}\nfix: ${fix}\n`)
-  process.exit(2)
+  throw new Refusal(`guard: ${reason}\nfix: ${fix}\n`)
 }
 
 // Read one literal argv. Decline shell syntax rather than interpreting it.
@@ -219,7 +213,8 @@ const judgeExecutor = (args) => {
   }
 }
 
-const judgeCommand = (command) => {
+/** `root` is the workspace; `cwd` is where the shell resolves relative paths. */
+const judgeCommand = (command, root, cwd) => {
   const args = directArgs(command)
   if (args === undefined) return
   while (/^[A-Za-z_][A-Za-z0-9_]*=/.test(args[0] ?? "")) {
@@ -286,29 +281,58 @@ const GUARDRAILS = [
   /^\.github\/workflows\//,
 ]
 
-const ask = (reason) => {
-  process.stdout.write(
-    `${JSON.stringify({
-      hookSpecificOutput: {
-        hookEventName: "PreToolUse",
-        permissionDecision: "ask",
-        permissionDecisionReason: reason,
-      },
-    })}\n`,
-  )
-  process.exit(0)
+const ask = (reason) =>
+  `${JSON.stringify({
+    hookSpecificOutput: {
+      hookEventName: "PreToolUse",
+      permissionDecision: "ask",
+      permissionDecisionReason: reason,
+    },
+  })}\n`
+
+/**
+ * The verdict for one PreToolUse payload: exit 2 refuses with `stderr`, and
+ * `stdout` carries an "ask" decision. A bare `{ exit: 0 }` lets the call through.
+ */
+export const judge = (input) => {
+  const root = workspaceFrom(input?.cwd) ?? repoRoot
+  const cwd = typeof input?.cwd === "string" ? input.cwd : root
+  const tool = input?.tool_input ?? {}
+  try {
+    if (input?.tool_name === "Bash" && typeof tool.command === "string") {
+      judgeCommand(tool.command, root, cwd)
+    }
+    if (["Edit", "Write"].includes(input?.tool_name) && typeof tool.file_path === "string") {
+      const path = fold(relative(root, resolve(root, tool.file_path)).replaceAll("\\", "/"))
+      for (const [pattern, fix] of PROTECTED) {
+        if (pattern.test(path)) deny(`${path} is managed by a tool`, fix)
+      }
+      if (GUARDRAILS.some((pattern) => pattern.test(path))) {
+        return {
+          exit: 0,
+          stdout: ask(
+            `${path} configures the checks that judge every change. Approve if the edit keeps them at least as strict; decline if it loosens a rule, threshold, or hook to get green.`,
+          ),
+        }
+      }
+    }
+    return { exit: 0 }
+  } catch (error) {
+    if (error instanceof Refusal) return { exit: 2, stderr: error.message }
+    throw error
+  }
 }
 
-const tool = input?.tool_input ?? {}
-if (input?.tool_name === "Bash" && typeof tool.command === "string") judgeCommand(tool.command)
-if (["Edit", "Write"].includes(input?.tool_name) && typeof tool.file_path === "string") {
-  const path = fold(relative(root, resolve(root, tool.file_path)).replaceAll("\\", "/"))
-  for (const [pattern, fix] of PROTECTED) {
-    if (pattern.test(path)) deny(`${path} is managed by a tool`, fix)
+// As the hook: one JSON payload on stdin. Unreadable input lets the call through.
+if (import.meta.url === pathToFileURL(process.argv[1] ?? "").href) {
+  let input
+  try {
+    input = JSON.parse(readFileSync(0, "utf8"))
+  } catch {
+    input = undefined
   }
-  if (GUARDRAILS.some((pattern) => pattern.test(path))) {
-    ask(
-      `${path} configures the checks that judge every change. Approve if the edit keeps them at least as strict; decline if it loosens a rule, threshold, or hook to get green.`,
-    )
-  }
+  const verdict = input === undefined ? { exit: 0 } : judge(input)
+  if (verdict.stdout !== undefined) process.stdout.write(verdict.stdout)
+  if (verdict.stderr !== undefined) process.stderr.write(verdict.stderr)
+  process.exitCode = verdict.exit
 }

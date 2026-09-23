@@ -1,6 +1,6 @@
 // oxlint-disable-next-line effecttsgo/node-builtin-import -- the stderr console bridge is the process boundary
 import { Console as NodeConsole } from "node:console"
-import { Console, Effect, Layer, Logger, Result, Schema } from "effect"
+import { Console, Effect, Layer, Logger, Result } from "effect"
 import {
   Argument,
   CliConfig,
@@ -10,15 +10,16 @@ import {
   Flag,
   GlobalFlag,
 } from "effect/unstable/cli"
-import { AppError, Errors } from "../errors.ts"
+import { Errors, isAppError } from "../errors.ts"
 import { negotiate } from "../output/format.ts"
 import type { OutputMode } from "../output/format.ts"
 import { DISCOVER } from "../output/guidance.ts"
+import type { CommandOutcome } from "../output/outcome.ts"
 import { Renderer } from "../output/renderer.ts"
 import type { AnyContract } from "./contract.ts"
 import type { RawInput } from "./execute.ts"
 import { runMutation, runQuery, splitInput, validateControls } from "./execute.ts"
-import { withMachineFormat } from "./guidance.ts"
+import { finalizeGuidance, withMachineFormat } from "./guidance.ts"
 import { describeCli } from "./jsonschema.ts"
 import type { CommandSurface, SurfaceParam } from "./surface.ts"
 import { surfaceOf } from "./surface.ts"
@@ -107,17 +108,17 @@ const commandTree = <E, R>(
       Command.withDescription(surface.contract.summary),
       Command.withExamples(surface.contract.examples.map((example) => ({ ...example }))),
     )
-  const groups = new Map<string, Array<CommandSurface>>()
   const topLevel: Array<CommandSurface> = []
+  const groups = new Map<string, Array<CommandSurface>>()
   for (const surface of surfaces) {
     const [group, leafName] = surface.path
-    if (surface.path.length > 2) {
-      throw new Error(`command paths deeper than two levels are not supported: "${surface.name}"`)
+    if (group === undefined || surface.path.length > 2) {
+      throw new Error(`command paths must have one or two levels: "${surface.name}"`)
     }
     if (leafName === undefined) {
       topLevel.push(surface)
     } else {
-      groups.set(group!, [...(groups.get(group!) ?? []), surface])
+      groups.set(group, [...(groups.get(group) ?? []), surface])
     }
   }
   return Command.make(binName).pipe(
@@ -178,8 +179,6 @@ export const inspectInvocation = Effect.fn("inspectInvocation")(function* (
   return { command, reason: failure?.kind === "usage" ? failure.failure.message : undefined }
 })
 
-const isAppError = Schema.is(AppError)
-
 /** The reason `args` would fail against the surface, or undefined when they parse. */
 export const validateInvocation = Effect.fn("validateInvocation")(function* (
   surfaces: ReadonlyArray<CommandSurface>,
@@ -215,12 +214,15 @@ export const runCli = Effect.fn("runCli")(function* (options: {
     }
     return yield* renderer.emit({ kind: "ok", data: describeCli(options) })
   }
-  const validate = (args: ReadonlyArray<string>) => validateInvocation(surfaces, args)
+  const emit = (outcome: CommandOutcome) =>
+    finalizeGuidance((args) => validateInvocation(surfaces, args), outcome).pipe(
+      Effect.flatMap((guided) => renderer.emit(guided)),
+    )
   const root = commandTree(options.binName, options.summary, surfaces, (surface, raw) => {
     const contract = surface.contract
     return contract.kind === "mutation"
-      ? runMutation(surface, contract, raw, validate)
-      : runQuery(surface, contract, raw, validate)
+      ? runMutation(surface, contract, raw, emit)
+      : runQuery(surface, contract, raw, emit)
   })
   const argv = mode.helpRequested ? withMachineFormat(mode.argv, ["--help"]) : mode.argv
   // renderOutcome owns error rendering in every format: the parser renders none.

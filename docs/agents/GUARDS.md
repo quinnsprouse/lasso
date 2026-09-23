@@ -1,6 +1,6 @@
 # Claude Code hooks
 
-The hooks in `.claude/hooks/` are registered in `.claude/settings.json`. They provide feedback and catch common mistakes. They do not enforce a security boundary. Lint, tests, git hooks, and CI run independently of the agent harness.
+The hooks in `.claude/hooks/` are registered in `.claude/settings.json`. They provide feedback and catch common mistakes. They do not enforce a security boundary. Lint, tests, git hooks, and CI run independently of the agent harness. The guarantees that no spelling gets around live on the server: protect `main` against force pushes and deletion, and require the `ci` check before merging.
 
 ## Direct-command checks
 
@@ -11,7 +11,7 @@ The hooks in `.claude/hooks/` are registered in `.claude/settings.json`. They pr
 - Direct `npx`, `bunx`, or package-manager `exec`/`dlx` invocations of pinned tools. Use the repository's npm scripts instead.
 - Direct `rm` of git metadata, the lockfile, or the repository root.
 
-The hook leaves shell programs alone, including pipelines, multiple commands, substitutions, heredocs, wrappers, and `sh -c` bodies. It does not expand variables, follow aliases, or resolve symlinks. These limits keep the check small and prevent literal script text from being mistaken for commands.
+`guard.mjs` exports `judge(payload)`, the decision itself, which the tests call in-process; run as the hook, it reads the payload from stdin. The hook leaves shell programs alone, including pipelines, multiple commands, substitutions, heredocs, wrappers, and `sh -c` bodies. It does not expand variables, follow aliases, or resolve symlinks. These limits keep the check small and prevent literal script text from being mistaken for commands.
 
 Edit/Write checks protect `dist/`, `coverage/`, `node_modules/`, `.git/`, `.lasso/`, the lockfile, the command snapshot, and the generated guide catalog. A refusal exits 2 and provides a `fix:` line.
 

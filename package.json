@@ -29,7 +29,7 @@
     "fmt": "biome format --write .",
     "fmt:check": "biome format .",
     "typecheck": "tsc --noEmit",
-    "knip": "knip --dependencies --exports --files --cycles --treat-config-hints-as-errors",
+    "knip": "knip",
     "setup": "lefthook install",
     "test:e2e": "vitest run test/e2e",
     "prepack": "tsdown --logLevel silent",

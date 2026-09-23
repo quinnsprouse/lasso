@@ -2,14 +2,13 @@ import { NodeServices } from "@effect/platform-node"
 import { Effect } from "effect"
 import type { Exit } from "effect"
 import { describe, expect, it } from "vitest"
-import { ExitSignal } from "../../src/contract/execute.ts"
 import { AppError, Errors } from "../../src/errors.ts"
 import type { OutputMode } from "../../src/output/format.ts"
 import { settleExit } from "../../src/runtime.ts"
 
 /**
  * Exit settlement covers every terminal class: success, control-flow exits,
- * expected failures, interruption, EPIPE, and defects — asserted per format.
+ * expected failures, interruption, and defects — asserted per format.
  */
 
 const mode = (format: OutputMode["format"]): OutputMode => ({
@@ -27,7 +26,7 @@ const exitOf = (effect: Effect.Effect<void, unknown>): Promise<Exit.Exit<void, u
 const settle = async (
   effect: Effect.Effect<void, unknown>,
   format: OutputMode["format"],
-  written?: "ok" | "confirmation",
+  written?: number,
 ) =>
   Effect.runPromise(
     settleExit({
@@ -42,23 +41,15 @@ const settle = async (
 
 describe("after the Renderer wrote the terminal outcome", () => {
   it("an interrupt that lands during or after the write adds nothing and keeps its code", async () => {
-    expect(await settle(Effect.interrupt, "json", "ok")).toEqual({ writes: [], code: 0 })
-    expect(await settle(Effect.interrupt, "ndjson", "confirmation")).toEqual({
-      writes: [],
-      code: 4,
-    })
-  })
-
-  it("a consumer that closed stdout does not turn a confirmation into success", async () => {
-    const epipe = Object.assign(new Error("write EPIPE"), { code: "EPIPE" })
-    expect(await settle(Effect.die(epipe), "json", "confirmation")).toEqual({
+    expect(await settle(Effect.interrupt, "json", 0)).toEqual({ writes: [], code: 0 })
+    expect(await settle(Effect.interrupt, "ndjson", 4)).toEqual({
       writes: [],
       code: 4,
     })
   })
 
   it("any other defect is reported on stderr only, never as a second envelope", async () => {
-    const settled = await settle(Effect.die(new Error("late bug")), "json", "ok")
+    const settled = await settle(Effect.die(new Error("late bug")), "json", 0)
     expect(settled.code).toBe(70)
     expect(settled.writes.every((write) => write.stream === "stderr")).toBe(true)
   })
@@ -70,9 +61,8 @@ describe("settleExit", () => {
     expect(settled).toEqual({ writes: [], code: 0 })
   })
 
-  it("ExitSignal carries its code with no writes", async () => {
-    const settled = await settle(Effect.fail(new ExitSignal({ code: 4 })), "json")
-    expect(settled).toEqual({ writes: [], code: 4 })
+  it("a written confirmation settles to exit 4 with no further writes", async () => {
+    expect(await settle(Effect.void, "json", 4)).toEqual({ writes: [], code: 4 })
   })
 
   it("AppError renders one envelope with details and maps its exit", async () => {
@@ -113,24 +103,6 @@ describe("settleExit", () => {
     expect(event.event).toBe("error")
     expect(event.error.code).toBe("interrupted")
     expect(event.next).toEqual([])
-  })
-
-  it("EPIPE defects exit 0 with no further output", async () => {
-    const epipe = Object.assign(new Error("write EPIPE"), { code: "EPIPE" })
-    const settled = await settle(Effect.die(epipe), "json")
-    expect(settled).toEqual({ writes: [], code: 0 })
-  })
-
-  it("EPIPE nested inside a platform error cause still exits 0 silently", async () => {
-    // The Stdio service wraps the native error: { _tag, reason, cause: { code: "EPIPE" } }.
-    const native = Object.assign(new Error("write EPIPE"), { code: "EPIPE" })
-    const wrapped = Object.assign(new Error("SystemError: write failed"), {
-      _tag: "PlatformError",
-      reason: { _tag: "Unknown" },
-      cause: native,
-    })
-    const settled = await settle(Effect.die(wrapped), "json")
-    expect(settled).toEqual({ writes: [], code: 0 })
   })
 
   it("other defects render internal_error once and exit 70", async () => {

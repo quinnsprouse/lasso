@@ -1,6 +1,5 @@
 import { NodeServices } from "@effect/platform-node"
-import { Effect, Fiber, Layer } from "effect"
-import type { Exit } from "effect"
+import { Effect, Exit, Fiber, Layer } from "effect"
 import { outputLayer, runCli } from "./contract/adapter.ts"
 import { surfaceOf } from "./contract/surface.ts"
 import { describeCli } from "./contract/jsonschema.ts"
@@ -101,26 +100,23 @@ const main = async (): Promise<number> => {
   process.on("SIGINT", onSignal)
   process.on("SIGTERM", onSignal)
   // When every fiber waits on something nothing can complete, Node's event
-  // loop drains and the process would exit 0 with no output. Settle it as the
-  // defect it is: the one terminal envelope, exit 70.
+  // loop drains and the process would exit 0 with no output. Interrupt like a
+  // signal, so finalizers run, then settle as the defect it is. Should the
+  // interrupt never finish either, the process still exits 70.
+  let stalled = false
   const onStall = () => {
-    if (terminal.kind !== undefined) {
-      // The outcome is already out; only a detached fiber is left waiting.
-      process.exitCode = terminal.kind === "confirmation" ? ExitCode.confirmationRequired : 0
-      return
-    }
-    render(mode, {
-      kind: "failure",
-      code: "internal_error",
-      message: "the command stopped making progress: it is waiting on work that can never finish",
-      fix: "this is a bug in the CLI, not in the invocation; report the command you ran",
-      transient: false,
-    })
+    stalled = true
     process.exitCode = ExitCode.internalDefect
+    Effect.runFork(Fiber.interrupt(fiber))
   }
   process.once("beforeExit", onStall)
-  const exit: Exit.Exit<void, unknown> = await Effect.runPromise(Fiber.await(fiber))
+  const finished = await Effect.runPromise(Fiber.await(fiber))
   process.removeListener("beforeExit", onStall)
+  const exit = stalled
+    ? Exit.die(
+        new Error("the command stopped making progress: it waits on work that can never finish"),
+      )
+    : finished
 
   const settled = await Effect.runPromise(
     settleExit({
@@ -129,7 +125,7 @@ const main = async (): Promise<number> => {
       binName: CLI_NAME,
       describeData,
       surfaces,
-      written: terminal.kind,
+      written: terminal.code,
     }).pipe(Effect.provide(NodeServices.layer)),
   )
   write(settled.writes)

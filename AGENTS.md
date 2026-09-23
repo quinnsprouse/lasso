@@ -60,7 +60,7 @@ npm run check
 
 `npm run surface:update` records the current definitions without classifying changes as safe or breaking. Review the diff before committing. A breaking change to a published CLI also bumps `SCHEMA_VERSION` in `src/output/envelope.ts` and documents the migration.
 
-To add an expected error code: add the `ERROR_CATALOG` row and the `Errors.*` factory in `src/errors.ts`, add the row to the table in `docs/agents/COMMANDS.md` (the invariants parse it), declare the code in each producing contract's `domainErrorCodes`, then `npm run surface:update`.
+To add an expected error code: add the `ERROR_CATALOG` row and the `Errors.*` factory in `src/errors.ts` (and list it in `STATE_CODES` when it means the data a plan read has changed), add the row to the table in `docs/agents/COMMANDS.md` (the invariants parse it), declare the code in each producing contract's `domainErrorCodes`, then `npm run surface:update`.
 
 ## Effect
 

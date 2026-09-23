@@ -246,7 +246,8 @@
         "effecttsgo/async-function": "off",
         "effecttsgo/unsafe-effect-type-assertion": "off",
         "effecttsgo/any-unknown-in-error-context": "off",
-        "effecttsgo/schema-sync": "off"
+        "effecttsgo/schema-sync": "off",
+        "effecttsgo/extends-native-error": "off"
       }
     },
     {

@@ -16,7 +16,7 @@ Handlers take services, so tests provide in-memory layers and run plan/apply as 
 - `type-fixtures.ts` checks invalid parameters and service boundaries at compile time. `test/unit/lint-boundaries.test.ts` probes the architecture lint rules with both allowed and forbidden code, including aliases.
 - `guides.test.ts` and `skill.test.ts` check references to real commands and topics. Writing style and length are authoring choices.
 - `test/unit/guide-generator.test.ts` verifies empty catalogs and standalone workflow topics.
-- `test/unit/guard.test.ts` checks direct-command refusals and the shell syntax the hook leaves alone.
+- `test/unit/guard.test.ts` checks direct-command refusals and the shell syntax the hook leaves alone, calling the guard's `judge` in-process; three cases run it as a hook process.
 
 ## Replacing mutation fixtures
 

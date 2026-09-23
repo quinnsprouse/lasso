@@ -6,9 +6,10 @@
 // The result compiles and passes the Fast profile immediately; replace the
 // handler (or plan and apply) with real logic.
 //
-// Every check runs before the first write, and every write (module, roster
-// entry, fixture, formatting, surface snapshot) is one transaction that rolls
-// back on failure, so the generator never leaves the tree half-edited.
+// The name checks run before the first write. Every write (module, roster
+// entry, fixture, formatting, a typecheck, surface snapshot) is one
+// transaction that rolls back on failure, so the generator never leaves the
+// tree half-edited or red.
 import { execFileSync } from "node:child_process"
 import { existsSync, readFileSync, rmSync, writeFileSync } from "node:fs"
 import { join, relative } from "node:path"
@@ -103,48 +104,12 @@ const requireMarkers = (text, markers, rel) => {
   }
 }
 
-/** Names bound at the top level of a module: imports and declarations. */
-const boundNames = (source) => {
-  const names = new Set()
-  for (const [, specifiers] of source.matchAll(/^import\s+(?:type\s+)?\{([^}]*)\}/gm)) {
-    for (const specifier of specifiers.split(",")) {
-      const local = specifier
-        .trim()
-        .replace(/^type\s+/, "")
-        .split(/\s+as\s+/)
-        .at(-1)
-      if (local) names.add(local)
-    }
-  }
-  const declaration =
-    /^(?:import\s+(?:\*\s+as\s+)?|(?:export\s+)?(?:const|let|var|function|class|type|interface)\s+)([A-Za-z_$][\w$]*)/gm
-  for (const [, name] of source.matchAll(declaration)) {
-    if (name !== "type") names.add(name)
-  }
-  return names
-}
-
 const index = readFileSync(indexFile, "utf8")
 requireMarkers(index, ["// generator:imports", "  // generator:contracts"], relIndex)
 const fixtures = mutation ? readFileSync(fixturesFile, "utf8") : undefined
 if (fixtures !== undefined) {
   requireMarkers(fixtures, ["// generator:imports", "  // generator:fixtures"], relFixtures)
 }
-// The new export is imported into each file the generator edits, next to the
-// scaffold's own imports: every one of those names must be free.
-const taken = [
-  [
-    "the scaffold",
-    new Set(["Effect", "Schema", "defineQuery", "defineMutation", `${typeName}Plan`]),
-  ],
-  [relIndex, boundNames(index)],
-  ...(fixtures !== undefined ? [[relFixtures, boundNames(fixtures)]] : []),
-].find(([, names]) => names.has(exportName))
-if (taken !== undefined) {
-  process.stderr.write(`"${exportName}" is already bound in ${taken[0]} — pick another name\n`)
-  process.exit(73)
-}
-
 const querySource = `import { Effect, Schema } from "effect"
 import { defineQuery } from "../contract/contract.ts"
 
@@ -230,13 +195,19 @@ const updatedFixtures = fixtures
   )
 
 // All checks passed. Every write below is one transaction: the new module,
-// the roster entry, the fixture, formatting, and the surface snapshot (a new
-// command is an additive surface change). Any failure rolls every file back.
+// the roster entry, the fixture, formatting, a typecheck, and the surface
+// snapshot (a new command is an additive surface change). Any failure restores
+// every file. `before: undefined` means the file is new and is removed.
+const edits = [
+  { path: file, text: mutation ? mutationSource : querySource, before: undefined },
+  { path: indexFile, text: updatedIndex, before: index },
+  ...(fixtures !== undefined
+    ? [{ path: fixturesFile, text: updatedFixtures, before: fixtures }]
+    : []),
+]
+const edited = edits.map((edit) => relative(repoRoot, edit.path))
 const snapshotFile = join(repoRoot, "test", "contract", "surface.snapshot.json")
 const snapshotBefore = existsSync(snapshotFile) ? readFileSync(snapshotFile, "utf8") : undefined
-let wroteFile = false
-let wroteIndex = false
-let wroteFixtures = false
 // With a listener, Node delivers a signal only after this synchronous
 // transaction has committed or rolled back; then the run exits 130.
 for (const signal of ["SIGINT", "SIGTERM"]) {
@@ -244,31 +215,28 @@ for (const signal of ["SIGINT", "SIGTERM"]) {
     process.exitCode = 130
   })
 }
+const written = []
 try {
-  writeFileSync(file, mutation ? mutationSource : querySource)
-  wroteFile = true
-  writeFileSync(indexFile, updatedIndex)
-  wroteIndex = true
-  if (updatedFixtures !== undefined) {
-    writeFileSync(fixturesFile, updatedFixtures)
-    wroteFixtures = true
+  for (const edit of edits) {
+    writeFileSync(edit.path, edit.text)
+    written.push(edit)
   }
-  execTool(
-    "biome",
-    ["format", "--write", relFile, relIndex, ...(wroteFixtures ? [relFixtures] : [])],
-    { stdio: "pipe" },
-  )
+  execTool("biome", ["format", "--write", ...edited], { stdio: "pipe" })
+  // The compiler, not a name scan, decides whether the new export collides
+  // with a binding in any file the generator touched.
+  execTool("tsc", ["--noEmit"], { stdio: "pipe" })
   execFileSync(process.execPath, [join(repoRoot, "scripts", "surface-snapshot.mjs")], {
     cwd: repoRoot,
     stdio: "pipe",
   })
 } catch (error) {
-  if (wroteFile) rmSync(file, { force: true })
-  if (wroteIndex) writeFileSync(indexFile, index)
-  if (wroteFixtures) writeFileSync(fixturesFile, fixtures)
+  for (const edit of written) {
+    if (edit.before === undefined) rmSync(edit.path, { force: true })
+    else writeFileSync(edit.path, edit.before)
+  }
   if (snapshotBefore !== undefined) writeFileSync(snapshotFile, snapshotBefore)
   process.stderr.write(
-    `generation failed; rolled back ${[relFile, relIndex, ...(mutation ? [relFixtures] : [])].join(", ")}, and the surface snapshot\n`,
+    `generation failed; rolled back ${edited.join(", ")}, and the surface snapshot\n`,
   )
   process.stderr.write(`${error.stdout ?? ""}${error.stderr ?? ""}${error.message}\n`)
   process.exit(70)

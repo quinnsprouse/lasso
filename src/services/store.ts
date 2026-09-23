@@ -1,5 +1,16 @@
 import type { PlatformError } from "effect"
-import { Clock, Context, Data, Effect, FileSystem, Layer, Path, Schedule, Schema } from "effect"
+import {
+  Clock,
+  Context,
+  Data,
+  Effect,
+  FileSystem,
+  Layer,
+  Option,
+  Path,
+  Schedule,
+  Schema,
+} from "effect"
 import { AppError, Errors } from "../errors.ts"
 import { Task } from "../domain/task.ts"
 
@@ -93,21 +104,20 @@ export class StoreWriter extends Context.Service<StoreWriter, StoreWriterApi>()(
         const tmp = `${file}.tmp`
 
         // A live holder keeps the lock for milliseconds. One this old was left by
-        // a killed process: retrying cannot help, so it is not transient.
+        // a killed process: retrying cannot help, so fail at once, not transient.
         const lockHeld = Effect.gen(function* () {
           const info = yield* fs.stat(lock).pipe(Effect.option)
           const now = yield* Clock.currentTimeMillis
-          const mtime = info._tag === "Some" ? info.value.mtime : undefined
-          const age = mtime?._tag === "Some" ? now - mtime.value.getTime() : 0
+          const age = Option.match(
+            Option.flatMap(info, (stat) => stat.mtime),
+            { onNone: () => 0, onSome: (mtime) => now - mtime.getTime() },
+          )
           return yield* age > STALE_LOCK_MILLIS
             ? Errors.cannotWrite({
                 message: `the task store lock ${lock} is ${Math.round(age / 1000)}s old; its process exited without releasing it`,
                 fix: `confirm no other ${DIR} writer is running, then remove the lock: rm -r ${lock}`,
               })
-            : Errors.transientFailure({
-                message: "the task store is locked by another process",
-                fix: "retry the command",
-              })
+            : Effect.fail(new LockBusy())
         })
 
         // Exclusive directory creation serializes concurrent writers. One attempt
@@ -117,17 +127,15 @@ export class StoreWriter extends Context.Service<StoreWriter, StoreWriterApi>()(
           yield* fs
             .makeDirectory(DIR, { recursive: true })
             .pipe(Effect.mapError(asCannotWrite(`create ${DIR}`)))
-          yield* fs.makeDirectory(lock).pipe(
-            Effect.catchReason("PlatformError", "AlreadyExists", () => Effect.fail(new LockBusy())),
-            Effect.mapError((error) =>
-              error._tag === "LockBusy"
-                ? error
-                : Errors.cannotWrite({
-                    message: `cannot create ${lock}: ${error.message}`,
-                    fix: WRITE_FIX,
-                  }),
-            ),
-          )
+          yield* fs
+            .makeDirectory(lock)
+            .pipe(
+              Effect.catch((error) =>
+                error.reason._tag === "AlreadyExists"
+                  ? lockHeld
+                  : Effect.fail(asCannotWrite(`create ${lock}`)(error)),
+              ),
+            )
         })
 
         const releaseLock = fs.remove(lock, { recursive: true }).pipe(Effect.ignore)
@@ -170,7 +178,12 @@ export class StoreWriter extends Context.Service<StoreWriter, StoreWriterApi>()(
                 times: 40,
                 while: (error) => error._tag === "LockBusy",
               }),
-              Effect.catchTag("LockBusy", () => lockHeld),
+              Effect.catchTag("LockBusy", () =>
+                Errors.transientFailure({
+                  message: "the task store is locked by another process",
+                  fix: "retry the command",
+                }),
+              ),
             )
           },
         )

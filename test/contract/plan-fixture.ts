@@ -3,7 +3,7 @@ import { Cause, Effect, Exit, Layer, Schema } from "effect"
 import { TestClock } from "effect/testing"
 import type { InputOf, MutationContract, ParamSpec } from "../../src/contract/contract.ts"
 import type { ErrorCode } from "../../src/errors.ts"
-import { AppError } from "../../src/errors.ts"
+import { isAppError } from "../../src/errors.ts"
 import { canonicalJson } from "../../src/contract/token.ts"
 
 type Expected = { readonly plan: unknown } | { readonly error: ErrorCode }
@@ -53,7 +53,7 @@ export const planFixture = <P extends Record<string, ParamSpec>, Plan, A, R, RAp
       return expect.fail(`expected error "${options.expected.error}", got a plan`)
     }
     const error = Cause.findErrorOption(first.cause)
-    if (error._tag !== "Some" || !Schema.is(AppError)(error.value)) {
+    if (error._tag !== "Some" || !isAppError(error.value)) {
       return expect.fail(`expected an AppError, got ${String(first)}`)
     }
     expect(error.value.code).toBe(options.expected.error)

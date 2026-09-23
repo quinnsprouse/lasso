@@ -1,25 +1,15 @@
-import { Cause, Effect, Exit, Predicate, Schema } from "effect"
-import type { ParserServices } from "./contract/adapter.ts"
+import { Cause, Effect, Exit } from "effect"
+import type { ParserServices, RunFailure } from "./contract/adapter.ts"
 import { classifyParserError, inspectInvocation, validateInvocation } from "./contract/adapter.ts"
-import { ExitSignal } from "./contract/execute.ts"
-import {
-  finalizeGuidance,
-  formatArgs,
-  withMachineFormat,
-  withoutFlag,
-  withReplacedToken,
-} from "./contract/guidance.ts"
+import { finalizeGuidance, previewArgs, withReplacedToken } from "./contract/guidance.ts"
 import type { CommandSurface } from "./contract/surface.ts"
-import { AppError, ERROR_CATALOG, isErrorCode } from "./errors.ts"
+import type { AppError, ErrorCode } from "./errors.ts"
+import { ERROR_CATALOG, isAppError, isErrorCode, messageOf } from "./errors.ts"
 import { ExitCode } from "./output/exit.ts"
 import type { OutputMode } from "./output/format.ts"
-import type { NextAction } from "./output/guidance.ts"
-import { DISCOVER } from "./output/guidance.ts"
+import { DISCOVER, NEXT_LIMIT } from "./output/guidance.ts"
 import type { Outcome, Write } from "./output/outcome.ts"
 import { renderOutcome } from "./output/outcome.ts"
-
-const isExitSignal = Schema.is(ExitSignal)
-const isAppError = Schema.is(AppError)
 
 /**
  * Settlement of a finished run: maps the Exit to the writes that still
@@ -31,7 +21,7 @@ export interface Settled {
   readonly code: number
 }
 
-export const settleExit = Effect.fn("settleExit")(function* (options: {
+interface SettleOptions {
   readonly exit: Exit.Exit<void, unknown>
   readonly mode: OutputMode
   readonly binName: string
@@ -39,176 +29,35 @@ export const settleExit = Effect.fn("settleExit")(function* (options: {
   readonly describeData: () => unknown
   /** The command surfaces, so next actions on settled failures are validated like any other. */
   readonly surfaces: ReadonlyArray<CommandSurface>
-  /** The terminal outcome the Renderer already wrote, if any (`TerminalLatch.kind`). */
-  readonly written: Outcome["kind"] | undefined
-}): Effect.fn.Return<Settled, never, ParserServices> {
-  const { exit, mode, binName, surfaces, written } = options
+  /** The exit code of the terminal outcome the Renderer already wrote (`TerminalLatch.code`). */
+  readonly written: number | undefined
+}
+
+/** What a failed run settles to: the outcome still to write, if any, and the exit code. */
+interface Failed {
+  readonly code: number
+  readonly outcome?: Outcome
+}
+
+export const settleExit = Effect.fn("settleExit")(function* (
+  options: SettleOptions,
+): Effect.fn.Return<Settled, never, ParserServices> {
+  const { exit, written } = options
+  if (written !== undefined) {
+    return afterTerminal(exit, written)
+  }
   if (Exit.isSuccess(exit)) {
     return { writes: [], code: ExitCode.success }
   }
-  if (written !== undefined) {
-    return afterTerminal(exit.cause, written)
+  const { code, outcome } = yield* failed(exit.cause, options)
+  if (outcome === undefined) {
+    return { writes: [], code }
   }
-  const render = (outcome: Outcome): ReadonlyArray<Write> => renderOutcome(mode, binName, outcome)
-  const guided = Effect.fn("settleExit.guided")(function* (
-    outcome: Outcome,
-    input: {
-      readonly next?: ReadonlyArray<NextAction> | undefined
-      readonly guides?: ReadonlyArray<string> | undefined
-    },
-  ) {
-    const guidance = yield* finalizeGuidance((args) => validateInvocation(surfaces, args), input)
-    return {
-      ...outcome,
-      next: guidance.next,
-      guides: guidance.guides,
-      warnings: [...(outcome.warnings ?? []), ...guidance.warnings],
-    } satisfies Outcome
-  })
-  /** argv without any mutation control, in the negotiated machine format: it previews, never applies. */
-  const previewing = (argv: ReadonlyArray<string>) =>
-    withMachineFormat(
-      withoutFlag(withoutFlag(withoutFlag(argv, "--confirm", true), "--yes"), "-y"),
-      formatArgs(mode.format),
-    )
-
-  if (Cause.hasInterruptsOnly(exit.cause)) {
-    const { command: invoked } = yield* inspectInvocation(surfaces, mode)
-    // An interrupted run still ends its stream with a terminal event, so a
-    // consumer that already saw progress never sees a stream without an end.
-    return {
-      writes: render(
-        yield* guided(
-          {
-            kind: "failure",
-            code: "interrupted",
-            message: "the command was interrupted before it finished",
-            fix: "re-run the command without --yes or --confirm so a mutation is re-planned against the current state before it applies",
-            transient: true,
-          },
-          {
-            next:
-              invoked === undefined
-                ? []
-                : [
-                    {
-                      message: "re-run and re-plan against the current state",
-                      args: previewing(mode.argv),
-                    },
-                  ],
-            guides: invoked?.guides,
-          },
-        ),
-      ),
-      code: ExitCode.interrupted,
-    }
-  }
-
-  const failure = Cause.findErrorOption(exit.cause)
-  if (failure._tag === "Some") {
-    const error = failure.value
-    if (isExitSignal(error)) {
-      return { writes: [], code: error.code }
-    }
-    if (isAppError(error)) {
-      // Exit and transience come from the catalog, never from the error
-      // instance: an AppError built outside `Errors.*` cannot invent either.
-      if (!isErrorCode(error.code)) {
-        return {
-          writes: render({
-            kind: "failure",
-            code: "internal_error",
-            message: `error code "${error.code}" is not in the catalog: ${error.message}`,
-            fix: "add the code to ERROR_CATALOG in src/errors.ts and build the error with Errors.*",
-            transient: false,
-          }),
-          code: ExitCode.internalDefect,
-        }
-      }
-      return {
-        writes: render(
-          yield* guided(
-            {
-              kind: "failure",
-              code: error.code,
-              message: error.message,
-              fix: error.fix,
-              transient: ERROR_CATALOG[error.code].transient,
-              details: error.details,
-            },
-            { next: error.next, guides: error.guides },
-          ),
-        ),
-        code: ERROR_CATALOG[error.code].exit,
-      }
-    }
-    const parserFailure = classifyParserError(error, binName)
-    if (parserFailure !== null) {
-      if (parserFailure.kind === "help") {
-        // Explicit help that reached the runtime (text mode rendered it there).
-        return {
-          writes:
-            mode.format === "text" ? [] : render({ kind: "ok", data: options.describeData() }),
-          code: ExitCode.success,
-        }
-      }
-      // The parser's closest spellings become next moves only when the
-      // corrected invocation parses; a guess that does not is left out, not warned.
-      const { message, fix, correction } = parserFailure.failure
-      const corrected: Array<{ readonly candidate: string; readonly args: ReadonlyArray<string> }> =
-        []
-      if (correction !== undefined) {
-        for (const candidate of correction.candidates.slice(0, 2)) {
-          const replaced = withReplacedToken(mode.argv, correction.token, candidate)
-          const args = replaced === undefined ? undefined : previewing(replaced)
-          if (args !== undefined && (yield* validateInvocation(surfaces, args)) === undefined) {
-            corrected.push({ candidate, args })
-          }
-        }
-      }
-      return {
-        writes: render(
-          yield* guided(
-            {
-              kind: "failure",
-              code: "invalid_usage",
-              message,
-              fix:
-                corrected[0] === undefined || correction === undefined
-                  ? fix
-                  : `use "${corrected[0].candidate}" instead of "${correction.token}"`,
-              transient: false,
-            },
-            {
-              next: [
-                ...corrected.map(({ candidate, args }) => ({
-                  message: `did you mean "${candidate}"?`,
-                  args,
-                })),
-                DISCOVER,
-              ],
-            },
-          ),
-        ),
-        code: ExitCode.usage,
-      }
-    }
-  }
-
-  const defect = Cause.squash(exit.cause)
-  if (isEpipe(defect)) {
-    return { writes: [], code: ExitCode.success }
-  }
-  return {
-    writes: render({
-      kind: "failure",
-      code: "internal_error",
-      message: defect instanceof Error ? defect.message : String(defect),
-      fix: "this is a bug in the CLI, not in the invocation; re-run with --log-level debug and report the output",
-      transient: false,
-    }),
-    code: ExitCode.internalDefect,
-  }
+  const guided = yield* finalizeGuidance(
+    (args) => validateInvocation(options.surfaces, args),
+    outcome,
+  )
+  return { writes: renderOutcome(options.mode, options.binName, guided), code }
 })
 
 /**
@@ -216,43 +65,122 @@ export const settleExit = Effect.fn("settleExit")(function* (options: {
  * stdout: an interrupt that landed during or after that write, or a consumer
  * that closed stdout, keeps the outcome's exit code.
  */
-const afterTerminal = (cause: Cause.Cause<unknown>, written: Outcome["kind"]): Settled => {
-  const failure = Cause.findErrorOption(cause)
-  if (failure._tag === "Some" && isExitSignal(failure.value)) {
-    return { writes: [], code: failure.value.code }
+const afterTerminal = (exit: Exit.Exit<void, unknown>, written: number): Settled =>
+  Exit.isSuccess(exit) || Cause.hasInterruptsOnly(exit.cause)
+    ? { writes: [], code: written }
+    : {
+        writes: [
+          {
+            stream: "stderr",
+            text: `internal error after the terminal outcome: ${messageOf(Cause.squash(exit.cause))}\n`,
+          },
+        ],
+        code: ExitCode.internalDefect,
+      }
+
+/** A catalog failure: its exit and transience come from the catalog row. */
+const failure = (
+  code: ErrorCode,
+  fields: Omit<Extract<Outcome, { kind: "failure" }>, "kind" | "code" | "transient">,
+): Failed => ({
+  code: ERROR_CATALOG[code].exit,
+  outcome: { kind: "failure", code, transient: ERROR_CATALOG[code].transient, ...fields },
+})
+
+const DEFECT_FIX =
+  "this is a bug in the CLI, not in the invocation; re-run with --log-level debug and report the output"
+
+const failed = Effect.fn("settleExit.failed")(function* (
+  cause: Cause.Cause<unknown>,
+  options: SettleOptions,
+): Effect.fn.Return<Failed, never, ParserServices> {
+  const { mode, surfaces } = options
+  if (Cause.hasInterruptsOnly(cause)) {
+    // An interrupted run still ends its stream with a terminal event, so a
+    // consumer that already saw progress never sees a stream without an end.
+    const { command } = yield* inspectInvocation(surfaces, mode)
+    return failure("interrupted", {
+      message: "the command was interrupted before it finished",
+      fix: "re-run the command without --yes or --confirm so a mutation is re-planned against the current state before it applies",
+      next:
+        command === undefined
+          ? []
+          : [
+              {
+                message: "re-run and re-plan against the current state",
+                args: previewArgs(mode.argv, mode.format),
+              },
+            ],
+      guides: command?.guides,
+    })
   }
-  if (Cause.hasInterruptsOnly(cause) || isEpipe(Cause.squash(cause))) {
+  const error = Cause.findErrorOption(cause)
+  if (error._tag === "Some" && isAppError(error.value)) {
+    return expected(error.value)
+  }
+  const parserFailure =
+    error._tag === "Some" ? classifyParserError(error.value, options.binName) : null
+  if (parserFailure?.kind === "help") {
+    // Explicit help that reached the runtime (text mode rendered it there).
     return {
-      writes: [],
-      code:
-        written === "confirmation"
-          ? ExitCode.confirmationRequired
-          : written === "ok"
-            ? ExitCode.success
-            : ExitCode.internalDefect,
+      code: ExitCode.success,
+      ...(mode.format === "text" ? {} : { outcome: { kind: "ok", data: options.describeData() } }),
     }
   }
-  const defect = Cause.squash(cause)
-  return {
-    writes: [
-      {
-        stream: "stderr",
-        text: `internal error after the terminal outcome: ${defect instanceof Error ? defect.message : String(defect)}\n`,
-      },
-    ],
-    code: ExitCode.internalDefect,
+  if (parserFailure?.kind === "usage") {
+    return yield* usage(parserFailure.failure, options)
   }
+  return failure("internal_error", { message: messageOf(Cause.squash(cause)), fix: DEFECT_FIX })
+})
+
+/**
+ * An expected failure. Exit and transience come from the catalog, never from
+ * the error instance: an AppError built outside `Errors.*` cannot invent either.
+ */
+const expected = (error: AppError): Failed => {
+  if (!isErrorCode(error.code)) {
+    return failure("internal_error", {
+      message: `error code "${error.code}" is not in the catalog: ${error.message}`,
+      fix: "add the code to ERROR_CATALOG in src/errors.ts and build the error with Errors.*",
+    })
+  }
+  const { message, fix, details, next, guides } = error
+  return failure(error.code, { message, fix, details, next, guides })
 }
 
 /**
- * A closed stdout arrives as a PlatformError from the Stdio service with the
- * native `EPIPE` error nested in `cause` (or `reason`), so the check walks
- * the chain instead of reading only the top-level `code`.
+ * A usage error. The parser's closest spellings become next moves only when
+ * the corrected invocation parses; a guess that does not is left out, not warned.
  */
-const isEpipe = (error: unknown, depth = 0): boolean =>
-  depth <= 8 &&
-  Predicate.isObjectKeyword(error) &&
-  ((Predicate.hasProperty(error, "code") && error.code === "EPIPE") ||
-    (["cause", "reason", "error"] as const).some(
-      (key) => Predicate.hasProperty(error, key) && isEpipe(error[key], depth + 1),
-    ))
+const usage = Effect.fn("settleExit.usage")(function* (
+  usageError: Extract<RunFailure, { kind: "usage" }>["failure"],
+  { mode, surfaces }: SettleOptions,
+): Effect.fn.Return<Failed, never, ParserServices> {
+  const { correction } = usageError
+  const corrected: Array<{ readonly candidate: string; readonly args: ReadonlyArray<string> }> = []
+  if (correction !== undefined) {
+    // Leave room for the discover move.
+    for (const candidate of correction.candidates.slice(0, NEXT_LIMIT - 1)) {
+      const replaced = withReplacedToken(mode.argv, correction.token, candidate)
+      const args = replaced === undefined ? undefined : previewArgs(replaced, mode.format)
+      if (args !== undefined && (yield* validateInvocation(surfaces, args)) === undefined) {
+        corrected.push({ candidate, args })
+      }
+    }
+  }
+  const best = corrected[0]
+  return failure("invalid_usage", {
+    message: usageError.message,
+    fix:
+      best === undefined || correction === undefined
+        ? usageError.fix
+        : `use "${best.candidate}" instead of "${correction.token}"`,
+    next: [
+      ...corrected.map(({ candidate, args }) => ({
+        message: `did you mean "${candidate}"?`,
+        args,
+      })),
+      DISCOVER,
+    ],
+  })
+})

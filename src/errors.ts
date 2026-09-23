@@ -35,6 +35,17 @@ export type ErrorCode = keyof typeof ERROR_CATALOG
 /** False for a code built outside the catalog (a hand-built AppError). */
 export const isErrorCode = (code: string): code is ErrorCode => Object.hasOwn(ERROR_CATALOG, code)
 
+/**
+ * Codes that mean the data a plan read has changed. A replay under --confirm
+ * that fails with one reports `stale_confirmation`; any other code (config,
+ * access, an outage) keeps its own code, exit, and fix. List a new data code here.
+ */
+export const STATE_CODES: ReadonlySet<string> = new Set<ErrorCode>([
+  "resource_conflict",
+  "not_found",
+  "invalid_data",
+])
+
 /** Codes a command handler may raise (the ones with an `Errors.*` factory). */
 export type CommandErrorCode = {
   [C in ErrorCode]: (typeof ERROR_CATALOG)[C]["raisedBy"] extends "command" ? C : never
@@ -75,6 +86,12 @@ export class AppError extends Schema.TaggedError<AppError>()("AppError", {
     })
   }
 }
+
+export const isAppError = Schema.is(AppError)
+
+/** The message of anything thrown or died with. */
+export const messageOf = (cause: unknown): string =>
+  cause instanceof Error ? cause.message : String(cause)
 
 export interface ErrorInit {
   readonly message: string

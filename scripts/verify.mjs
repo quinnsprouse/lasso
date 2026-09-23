@@ -21,14 +21,8 @@ const profiles = {
   ],
   push: [
     step("build", "tsdown", []),
-    // Every issue type, cycles included (knip leaves cycles out by default).
-    step("knip", "knip", [
-      "--dependencies",
-      "--exports",
-      "--files",
-      "--cycles",
-      "--treat-config-hints-as-errors",
-    ]),
+    // knip.json lists every issue type, cycles included (knip leaves them out by default).
+    step("knip", "knip", []),
     step("e2e", "vitest", ["run", "test/e2e"]),
     step("pack smoke", "node", ["scripts/pack-smoke.mjs"]),
   ],

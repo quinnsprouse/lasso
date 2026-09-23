@@ -4,7 +4,7 @@
 // oxlint patch is verified by actually catching a planted floating Effect,
 // not by looking for backup files. Pass --json for machine output.
 import { execFileSync } from "node:child_process"
-import { existsSync, readFileSync, rmSync, writeFileSync } from "node:fs"
+import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs"
 import { join, resolve } from "node:path"
 import { ensureInstalled, execTool, repoRoot } from "./lib/toolchain.mjs"
 
@@ -129,25 +129,25 @@ check("effect versions aligned", () => {
 })
 
 check("effect oxlint patch active", () => {
-  // Functional probe: a floating Effect must trip the effecttsgo rule.
-  // Type-aware lint only sees files inside tsconfig's include, so the probe
-  // lives in src/ for the duration of one lint run and is always removed.
-  const probe = join("src", `__doctor_probe_${process.pid}__.ts`)
-  // A listener defers SIGINT/SIGTERM until the probe is removed below; without
-  // one, a kill mid-lint would leave the probe to fail every later lint run.
-  for (const signal of ["SIGINT", "SIGTERM"]) {
-    process.on(signal, () => {
-      process.exitCode = 130
-    })
-  }
+  // Functional probe: a floating Effect must trip the effecttsgo rule. The
+  // probe gets its own tsconfig in node_modules/.cache, outside every project
+  // glob, so a leftover probe (a killed doctor) never reaches lint or tsc.
+  const dir = join(repoRoot, "node_modules", ".cache", `lasso-doctor-${process.pid}`)
+  mkdirSync(dir, { recursive: true })
   writeFileSync(
-    join(repoRoot, probe),
+    join(dir, "tsconfig.json"),
+    `${JSON.stringify({ extends: join(repoRoot, "tsconfig.json"), include: ["probe.ts"] })}\n`,
+  )
+  writeFileSync(
+    join(dir, "probe.ts"),
     'import { Effect } from "effect"\nexport const f = () => {\n  Effect.succeed(1)\n  return 2\n}\n',
   )
   try {
     const output = (() => {
       try {
-        return execTool("oxlint", ["--type-aware", probe], { stdio: "pipe" })
+        return execTool("oxlint", ["--type-aware", "--no-ignore", join(dir, "probe.ts")], {
+          stdio: "pipe",
+        })
       } catch (error) {
         return `${error.stdout ?? ""}${error.stderr ?? ""}`
       }
@@ -159,7 +159,7 @@ check("effect oxlint patch active", () => {
       )
     }
   } finally {
-    rmSync(join(repoRoot, probe), { force: true })
+    rmSync(dir, { recursive: true, force: true })
   }
   return "effecttsgo rules firing"
 })

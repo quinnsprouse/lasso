@@ -1,13 +1,44 @@
-import { Context, Effect, Layer, Schema, Stdio, Stream } from "effect"
+import { Context, Effect, Layer, Predicate, Schema, Stdio, Stream } from "effect"
 import { ProgressEvent } from "./envelope.ts"
+import { ExitCode } from "./exit.ts"
 import type { OutputMode } from "./format.ts"
-import type { Outcome } from "./outcome.ts"
+import type { CommandOutcome, Write } from "./outcome.ts"
 import { renderOutcome } from "./outcome.ts"
 
 // Stdio keeps output capturable through test layers.
 
 const decodeProgress = Schema.decodeUnknownEffect(ProgressEvent)
 const encodeProgressLine = Schema.encodeEffect(Schema.fromJsonString(ProgressEvent))
+
+/**
+ * A closed stdout arrives as a PlatformError from the Stdio service with the
+ * native `EPIPE` error nested in `cause` (or `reason`), so the check walks
+ * the chain instead of reading only the top-level `code`.
+ */
+const isEpipe = (error: unknown, depth = 0): boolean =>
+  depth <= 8 &&
+  Predicate.isObjectKeyword(error) &&
+  ((Predicate.hasProperty(error, "code") && error.code === "EPIPE") ||
+    (["cause", "reason", "error"] as const).some(
+      (key) => Predicate.hasProperty(error, key) && isEpipe(error[key], depth + 1),
+    ))
+
+/**
+ * Adjacent writes to one stream, joined: an NDJSON collection becomes one
+ * write instead of one per line, with the same bytes in the same order.
+ */
+const coalesce = (writes: ReadonlyArray<Write>): ReadonlyArray<Write> => {
+  const joined: Array<Write> = []
+  for (const write of writes) {
+    const last = joined.at(-1)
+    if (last?.stream === write.stream) {
+      joined[joined.length - 1] = { stream: write.stream, text: last.text + write.text }
+    } else {
+      joined.push(write)
+    }
+  }
+  return joined
+}
 
 /** Progress input; `completed` and `total` must appear together. */
 export interface ProgressUpdate {
@@ -18,11 +49,12 @@ export interface ProgressUpdate {
 }
 
 /**
- * Records the terminal outcome the Renderer wrote, so settlement never adds a
- * second one: an interrupt or a closed stdout after it keeps that outcome.
+ * The exit code of the terminal outcome the Renderer wrote, once it has. The
+ * process boundary reads it: a written outcome is final, so settlement adds
+ * nothing after it and exits with this code.
  */
 export class TerminalLatch {
-  kind: Outcome["kind"] | undefined = undefined
+  code: ExitCode | undefined = undefined
 }
 
 /**
@@ -31,7 +63,7 @@ export class TerminalLatch {
  */
 export interface RendererApi {
   readonly mode: OutputMode
-  emit(outcome: Outcome): Effect.Effect<void>
+  emit(outcome: CommandOutcome): Effect.Effect<void>
   /**
    * Nonterminal progress during a long command. NDJSON: a `progress` event
    * on stdout. JSON and text: a stderr line — stdout stays terminal-only.
@@ -57,13 +89,15 @@ export class Renderer extends Context.Service<Renderer, RendererApi>()("lasso/ou
                 ? stdio.stdout({ endOnDone: false })
                 : stdio.stderr({ endOnDone: false }),
             ),
+            // A consumer that closed stdout (`| head`) is done reading, not failing.
+            Effect.catchIf(isEpipe, () => Effect.void),
             Effect.orDie,
           )
 
         // Detached reporting fibers must not write after the terminal event; check
         // at execution time, even when a handler constructs a progress effect early.
         const progress = Effect.fn("Renderer.progress")(function* (update: ProgressUpdate) {
-          if (terminal.kind !== undefined) {
+          if (terminal.code !== undefined) {
             return yield* Effect.die(new Error("progress after the terminal event"))
           }
           const event = yield* decodeProgress({
@@ -87,11 +121,12 @@ export class Renderer extends Context.Service<Renderer, RendererApi>()("lasso/ou
           // Uninterruptible: once the terminal outcome starts, it is written whole.
           emit: (outcome) =>
             Effect.suspend(() => {
-              if (terminal.kind !== undefined) {
+              if (terminal.code !== undefined) {
                 return Effect.die(new Error("emit after the terminal event"))
               }
-              terminal.kind = outcome.kind
-              return Effect.forEach(renderOutcome(mode, binName, outcome), (write) =>
+              terminal.code =
+                outcome.kind === "confirmation" ? ExitCode.confirmationRequired : ExitCode.success
+              return Effect.forEach(coalesce(renderOutcome(mode, binName, outcome)), (write) =>
                 writeTo(write.stream, write.text),
               ).pipe(Effect.asVoid, Effect.uninterruptible)
             }),

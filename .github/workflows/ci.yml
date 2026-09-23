@@ -14,13 +14,17 @@ jobs:
       matrix:
         os: [ubuntu-latest, macos-latest]
         node: [24]
+        profile: [ci]
         include:
           # The minimum advertised runtime is verified on one platform.
           - os: ubuntu-latest
             node: 22.19.0
-          # The current release line, so the next LTS breaks here first.
+            profile: ci
+          # The current release line, so the next LTS breaks here first. Push is
+          # enough: coverage and the Starter Contract already ran on the rows above.
           - os: ubuntu-latest
             node: 26
+            profile: push
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -31,7 +35,7 @@ jobs:
       - run: npm ci
       # The CI profile is the same script the pre-push hook runs, plus
       # coverage and the Starter Contract. Local green means CI green.
-      - run: npm run check:ci
+      - run: npm run check:${{ matrix.profile }}
         env:
           GIT_AUTHOR_NAME: ci
           GIT_AUTHOR_EMAIL: ci@invalid

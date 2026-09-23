@@ -121,7 +121,7 @@ export const makeInvoke =
         binName: "lasso",
         describeData: () => ({}),
         surfaces: contracts.map(surfaceOf),
-        written: terminal.kind,
+        written: terminal.code,
       }).pipe(Effect.provide(environment)),
     )
     for (const chunk of settled.writes) {

@@ -40,6 +40,12 @@ const writerWith = (initial: ReadonlyArray<Task>) => {
 
 const input = (title: string, ifNotExists = false) => ({ title, ifNotExists })
 
+const createPlan = (ifExists: "fail" | "skip") => ({
+  action: "create_task" as const,
+  task: { id: "task_x", title: "X", status: "open" as const },
+  ifExists,
+})
+
 describe("task create plan", () => {
   it.effect("derives a deterministic, self-contained plan", () =>
     Effect.gen(function* () {
@@ -89,11 +95,7 @@ describe("task create apply", () => {
   it.effect("persists exactly the planned task", () => {
     const { layer, states } = writerWith([])
     return Effect.gen(function* () {
-      const result = yield* taskCreate.apply({
-        action: "create_task",
-        task: { id: "task_x", title: "X", status: "open" },
-        ifExists: "fail",
-      })
+      const result = yield* taskCreate.apply(createPlan("fail"))
       expect(result.created).toBe(true)
       expect(states.at(-1)!.map((task) => task.id)).toEqual(["task_x"])
     }).pipe(Effect.provide(layer))
@@ -103,11 +105,7 @@ describe("task create apply", () => {
     const { layer } = writerWith([])
     return Effect.gen(function* () {
       yield* TestClock.setTime(Date.parse("2026-03-04T05:06:07.000Z"))
-      const result = yield* taskCreate.apply({
-        action: "create_task",
-        task: { id: "task_x", title: "X", status: "open" },
-        ifExists: "fail",
-      })
+      const result = yield* taskCreate.apply(createPlan("fail"))
       expect(result.task.createdAt).toBe("2026-03-04T05:06:07.000Z")
     }).pipe(Effect.provide(layer))
   })
@@ -130,11 +128,7 @@ describe("task create apply", () => {
   it.effect("with --if-not-exists, losing a race to another writer is the promised no-op", () => {
     const { layer, states } = writerWith([seed("task_x", "X")])
     return Effect.gen(function* () {
-      const result = yield* taskCreate.apply({
-        action: "create_task",
-        task: { id: "task_x", title: "X", status: "open" },
-        ifExists: "skip",
-      })
+      const result = yield* taskCreate.apply(createPlan("skip"))
       expect(result).toEqual({ created: false, task: seed("task_x", "X") })
       expect(states.length).toBe(1)
     }).pipe(Effect.provide(layer))
@@ -143,13 +137,7 @@ describe("task create apply", () => {
   it.effect("reports a conflict when another process created the task after planning", () => {
     const { layer, states } = writerWith([seed("task_x", "X")])
     return Effect.gen(function* () {
-      const error = yield* Effect.flip(
-        taskCreate.apply({
-          action: "create_task",
-          task: { id: "task_x", title: "X", status: "open" },
-          ifExists: "fail",
-        }),
-      )
+      const error = yield* Effect.flip(taskCreate.apply(createPlan("fail")))
       expect(error.code).toBe("resource_conflict")
       // A rejected mutation performs no write at all.
       expect(states.length).toBe(1)
