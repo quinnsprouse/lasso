@@ -61,7 +61,7 @@ Agents start with [AGENTS.md](AGENTS.md). [CONTEXT.md](CONTEXT.md) defines proje
 
 - [Effect](https://effect.website) v4 release candidate with `effect/unstable/cli`, tested with `@effect/vitest`
 - TypeScript 7 with type-aware [oxlint](https://oxc.rs) and [Biome](https://biomejs.dev)
-- [tsdown](https://tsdown.dev) with one self-contained CommonJS bundle
+- [tsdown](https://tsdown.dev) with one self-contained, minified CommonJS bundle; the launcher enables Node's compile cache, so a command adds about 15 ms to Node's own startup
 - [Vitest](https://vitest.dev), fast-check, and execa
 - [lefthook](https://lefthook.dev), commitlint, and [knip](https://knip.dev)
 

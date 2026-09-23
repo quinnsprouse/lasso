@@ -11,6 +11,7 @@ The machine surface is additive-only. Each entry names a user-visible change; a 
 - Under `--confirm`, only a data change (`resource_conflict`, `not_found`, `invalid_data`) reports as `stale_confirmation`; an unreadable store or an outage keeps its own code, exit, and `fix`.
 - Text mode: parser output honors `TERM=dumb` and `CI`, and logs go to stderr in every format. An empty `LASSO_FORMAT` counts as unset; `--format auto` defers to a concrete format.
 - Mutations: `apply` receives the plan decoded from the exact JSON the token hashed.
+- Faster: the bundle is minified (names kept for debugging, 1.2 MB → 465 KB) and the launcher enables Node's compile cache, which halves the CLI's startup overhead; NDJSON collections are written in one pass, twice as fast at 50,000 items.
 - Demo: `task create` plans record `ifExists`, so `--if-not-exists` stays a no-op when another writer wins the race; ids normalize Unicode (NFC) and never end in `-` after truncation.
 - Demo store: a lock left behind by a killed process now fails as non-transient `cannot_write`, with the removal command in `fix`, instead of a `transient_failure` that no retry could clear. A writer waiting on a held lock can be interrupted. Fields this version does not know are rejected as `invalid_config` instead of dropped on the next write; unreadable stores report `invalid_config`, not `cannot_write`; a failed write leaves no temp file.
 
