@@ -4,6 +4,7 @@ import { makeGuideCommands } from "./guide.ts"
 import { makeIntrospection } from "./introspection.ts"
 import { taskAudit } from "./task-audit.ts"
 import { taskCreate } from "./task-create.ts"
+import { taskImport } from "./task-import.ts"
 import { taskList } from "./task-list.ts"
 // generator:imports — scripts/new-command.mjs inserts above this line
 
@@ -20,6 +21,7 @@ export const contracts: ReadonlyArray<RosterContract> = [
   taskList,
   taskAudit,
   taskCreate,
+  taskImport,
   introspection.describe,
   introspection.schema,
   guide.list,

@@ -51,6 +51,7 @@ One event object per line: `item`, `warning`, `progress`, `summary`, `confirmati
 
 - `mycli describe --json` — the command inventory (params, capabilities, error codes, examples, guides), the global flags, the guide topics, the exit registry, and the error catalog; envelope and event shapes live in `schema --json`. `--help` in JSON mode returns the same payload for any known command path, without requiring positional arguments; supplied flags and values are still validated. An unknown path, an unknown flag, or an invalid value for a global flag (`--format`, `--log-level`, `--completions`) is still `invalid_usage`.
 - `mycli schema --json` — JSON Schema (draft 2020-12) for every command's params, output, and plan.
+- `protocol.environment` in `describe` lists every environment variable the CLI reads, with a description and whether it holds a secret. Secrets never appear in any output.
 
 - `mycli describe --command "<name>" --json` — one command's surface and only the guides it references, for a smaller context budget.
 - `mycli guide list --json` / `mycli guide get <topic> [--brief] --json` — the version-matched guide catalog: knowledge the surface cannot express (see [GUIDANCE.md](GUIDANCE.md)).

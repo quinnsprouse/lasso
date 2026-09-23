@@ -7,6 +7,7 @@ import { guideInventory } from "../guides/catalog.ts"
 import type { GlobalFlag } from "./invocation.ts"
 import { GLOBAL_FLAGS } from "./invocation.ts"
 import { ExitCode } from "../output/exit.ts"
+import { ENVIRONMENT } from "../settings.ts"
 import {
   ConfirmationEnvelope,
   ErrorEnvelope,
@@ -118,6 +119,7 @@ export const describeCli = (options: {
         "Guide topic ids to read for the model this outcome assumes; fetch with: guide get <topic>",
     },
     ndjsonEvents: ["item", "warning", "progress", "summary", "confirmation_required", "error"],
+    environment: Object.values(ENVIRONMENT),
     exitCodes: ExitCode,
     errorCatalog: errorCatalogTable(),
   },

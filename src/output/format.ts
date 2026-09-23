@@ -1,4 +1,5 @@
 import { validateGlobalFlags } from "../contract/invocation.ts"
+import { ENVIRONMENT } from "../settings.ts"
 
 /**
  * Format negotiation happens BEFORE command parsing so that even a parse
@@ -96,12 +97,12 @@ export const negotiate = (options: NegotiateOptions): OutputMode => {
   }
 
   // An empty variable is unset, as CI systems often export them.
-  const envFormat = options.env["LASSO_FORMAT"] || undefined
+  const envFormat = options.env[ENVIRONMENT.format.name] || undefined
   if (format === undefined && envFormat !== undefined) {
     if (isFormat(envFormat)) {
       format = envFormat
     } else if (error === undefined) {
-      error = `invalid LASSO_FORMAT value "${envFormat}"`
+      error = `invalid ${ENVIRONMENT.format.name} value "${envFormat}"`
     }
   }
 

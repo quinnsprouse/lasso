@@ -92,3 +92,11 @@ The runtime alone produces `internal_error` (exit 70, a defect) and `interrupted
 ## Services
 
 Handlers reach the world through services (`src/services/`), never `node:fs`, `process`, or Effect's `Console` (lint blocks all three; narrate through the `Progress` service). Define a service with `Context.Service`, give it a production `layer`, add it to the capability unions and merge its layer into `appServicesLayer` in `src/services/index.ts`. Tests provide fake layers — see `test/unit/task-create.test.ts`.
+
+### Settings
+
+Every environment variable lives in `ENVIRONMENT` in `src/settings.ts`, which `describe` publishes as `protocol.environment`. Read a value through an Effect `Config` wrapped by `setting(...)`, at the point of use: a malformed value fails that one command as `invalid_config` with a fix naming the variable, and introspection never depends on configuration. Secrets use `Config.Redacted`, so they cannot print. Tests supply values with `ConfigProvider.layer(ConfigProvider.fromUnknown({ … }))`.
+
+### Calling an API
+
+Follow `src/services/feed.ts`. Set the client's middleware once in the layer (`HttpClient.mapRequest(HttpClientRequest.acceptJson)`, `HttpClient.filterStatusOk`, `HttpClient.retryTransient` with a bounded, jittered schedule), bound each call with `Effect.timeout`, decode the body with a schema, and map failures with `httpFailure` from `src/services/http.ts`. Its mapping keeps `transient` truthful: timeouts, network failures, 408, 429, and 5xx are transient; 401/403 is `auth_failure`, 404/410 is `not_found`. `FetchHttpClient.layer` (Node's built-in fetch) is provided in `appServicesLayer`, so the bundle needs no HTTP dependency; tests provide `HttpClient.make(...)` fakes (see `test/unit/feed.test.ts`). A remote read belongs in `plan`, and the plan carries what it read, so a confirmed mutation applies exactly what was previewed.

@@ -17,6 +17,7 @@ import { negotiate } from "../../src/output/format.ts"
 import { Progress } from "../../src/output/progress.ts"
 import { Renderer, TerminalLatch } from "../../src/output/renderer.ts"
 import { settleExit } from "../../src/runtime.ts"
+import { TaskFeed } from "../../src/services/feed.ts"
 import { StoreReader, StoreWriter } from "../../src/services/store.ts"
 
 /**
@@ -76,6 +77,8 @@ export const makeInvoke =
     argv: ReadonlyArray<string>,
     format: OutputMode["format"] = "json",
     tasks: ReadonlyArray<Task> = [],
+    /** The titles the fake task feed serves at any URL. */
+    feed: ReadonlyArray<string> = [],
   ): Promise<Invocation> => {
     const mode = negotiate({
       argv,
@@ -97,6 +100,7 @@ export const makeInvoke =
         StoreWriter,
         StoreWriter.of({ modify: (transform) => Effect.sync(() => transform(tasks) ?? tasks) }),
       ),
+      Layer.succeed(TaskFeed, TaskFeed.of({ titles: () => Effect.succeed(feed) })),
     )
 
     const environment = testPlatform(testStdio)

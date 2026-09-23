@@ -13,7 +13,7 @@ npm run dev -- task list --json # run from source
 
 Node ^22.19, ^24.11, or 26 and newer (the dev toolchain's range; the shipped CLI runs on any Node 22.19 or newer), npm 10 or newer. Disposable experiments go in `.scratch/` or the OS temp directory, never the repository root.
 
-Replace the demo in `src/domain/`, `src/commands/task-*.ts`, and `src/services/store.ts`. Update service wiring in `src/services/index.ts` and command registration in `src/commands/index.ts`. Replace the task-specific unit and command tests, `test/fixtures/mutations.ts`, the demo services in `test/contract/harness.ts`, and the task journeys in the e2e suite and `scripts/starter-contract.mjs`. The demo also includes `guides/topics/`, the router rows in `skills/lasso/SKILL.md`, and the `.lasso/` state directory.
+Replace the demo in `src/domain/`, `src/commands/task-*.ts`, `src/services/store.ts`, and `src/services/feed.ts`, and its rows in `src/settings.ts`. Keep `src/services/http.ts`: it maps HTTP failures to the error catalog for any API service. Update service wiring in `src/services/index.ts` and command registration in `src/commands/index.ts`. Replace the task-specific unit and command tests, `test/fixtures/mutations.ts`, the demo services in `test/contract/harness.ts`, and the task journeys in the e2e suite and `scripts/starter-contract.mjs`. The demo also includes `guides/topics/`, the router rows in `skills/lasso/SKILL.md`, and the `.lasso/` state directory.
 
 Keep the contract definitions, parser adapter, output protocol, and reusable checks. [Testing](docs/agents/TESTING.md) explains how to supply fixtures for replacement commands.
 
@@ -64,7 +64,7 @@ To add an expected error code: add the `ERROR_CATALOG` row and the `Errors.*` fa
 
 ## Effect
 
-Before writing Effect code, read `node_modules/effect/AGENTS.md`; for API details use `node_modules/effect/ai-docs/src`, which matches the installed version. `effect`, `@effect/platform-node`, and `@effect/vitest` are exact-pinned to the same release candidate; generic `effect@beta` or `effect@latest` (v3) install instructions never override those pins. Use `Effect.fn("name")(function* …)` for handlers, plans, applies, and service methods that return generator effects; a handler with no services and no failure may return `Effect.succeed` or `Effect.sync` directly. Reach the world through services, never `node:fs`, `process`, global `fetch`, `Date`, or Effect `Console`.
+Before writing Effect code, read `node_modules/effect/AGENTS.md`; for API details use `node_modules/effect/ai-docs/src`, which matches the installed version. `effect`, `@effect/platform-node`, and `@effect/vitest` are exact-pinned to the same release candidate; generic `effect@beta` or `effect@latest` (v3) install instructions never override those pins. Use `Effect.fn("name")(function* …)` for handlers, plans, applies, and service methods that return generator effects; a handler with no services and no failure may return `Effect.succeed` or `Effect.sync` directly. Reach the world through services, never `node:fs`, `process`, global `fetch`, `Date`, or Effect `Console`. Read settings from `src/settings.ts` (Effect `Config`, secrets as `Redacted`, published by `describe`), and call APIs through `HttpClient` with failures mapped by `httpFailure`; `src/services/feed.ts` is the pattern.
 
 ## Claude Code guards
 

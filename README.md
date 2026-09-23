@@ -32,6 +32,7 @@ In JSON mode, Lasso writes one envelope to stdout for each invocation. It sends 
 - Every mutation begins with a read-only plan. The runtime owns `--confirm`, `--dry-run`, and `--yes`.
 - Exit code 4 requests confirmation. `transient: true` means a retry may work (exits 69, 75, and 130 carry it).
 - `describe --json` lists every command. `schema --json` returns JSON Schema draft 2020-12.
+- Settings are typed and discoverable: `describe --json` lists every environment variable, and secrets stay redacted. API calls go through Effect's `HttpClient` on Node's built-in fetch, with retries and HTTP failures mapped to honest `transient` flags.
 - Every outcome carries `next` (executable next moves) and `guides` (topic ids); `guide get <topic>` serves version-matched guides for what the surface cannot express, and `skills/` ships the skill that routes agents to them.
 - A committed snapshot makes command and schema changes visible in review. Tests require the snapshot to stay current; reviewers decide compatibility.
 - Claude Code hooks in `.claude/` check direct commands and report formatting and lint errors after edits. Full type and Effect checks after each edit are opt-in.

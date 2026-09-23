@@ -1,9 +1,11 @@
 import { once } from "node:events"
 import { mkdir, mkdtemp, rm, stat, writeFile } from "node:fs/promises"
+import { createServer } from "node:http"
+import type { AddressInfo, Server } from "node:net"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { execaNode } from "execa"
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest"
 
 // Run the built artifact after tsdown, using the same Node executable as the test runner.
 // Cases spawn the binary several times; under coverage on a loaded runner that
@@ -386,7 +388,7 @@ describe("guides and guidance through the shipped binary", () => {
     expect(topics).toContain("task-ids")
     const got = await run(["guide", "get", "task-ids", "--json"])
     expect(parse(got.stdout).data.content).toContain("# How task ids are derived")
-    expect(parse(got.stdout).data.commands).toEqual(["task create", "task list"])
+    expect(parse(got.stdout).data.commands).toEqual(["task create", "task import", "task list"])
     const brief = await run(["guide", "get", "task-ids", "--brief", "--json"])
     expect(parse(brief.stdout).data.content).toBeUndefined()
     const missing = await run(["guide", "get", "nope", "--json"])
@@ -408,7 +410,7 @@ describe("guides and guidance through the shipped binary", () => {
     const narrowed = parse(one.stdout).data
     expect(narrowed.commands.map((c: any) => c.name)).toEqual(["task list"])
     expect(narrowed.guideTopics.map((g: any) => g.topic)).toEqual(["task-ids"])
-    expect(narrowed.guideTopics[0].commands).toEqual(["task create", "task list"])
+    expect(narrowed.guideTopics[0].commands).toEqual(["task create", "task import", "task list"])
     expect(one.stdout.length).toBeLessThan(12_000)
     expect(full.stdout.length).toBeLessThan(32_000)
     const unknown = await run(["describe", "--command", "nope", "--json"])
@@ -470,5 +472,58 @@ describe("action flags in every spelling", () => {
     expect(result.exitCode).toBe(0)
     expect(parse(result.stdout).next.length).toBe(1)
     expect(parse(result.stdout).warnings).toEqual([])
+  })
+})
+
+describe("task import over real HTTP (the bundle's fetch client)", () => {
+  let server: Server
+  let base = ""
+
+  beforeAll(async () => {
+    const feed = JSON.stringify({
+      tasks: [{ title: "Ship" }, { title: "Docs" }, { title: "Ship" }],
+    })
+    server = createServer((request, response) => {
+      const authorized = request.headers.authorization === "Bearer s3cret"
+      if (request.url === "/tasks.json" || (request.url === "/private.json" && authorized)) {
+        response.writeHead(200, { "content-type": "application/json" }).end(feed)
+      } else {
+        response.writeHead(request.url === "/private.json" ? 401 : 404).end()
+      }
+    })
+    server.listen(0, "127.0.0.1")
+    await once(server, "listening")
+    base = `http://127.0.0.1:${(server.address() as AddressInfo).port}`
+  })
+
+  afterAll(async () => {
+    server.close()
+    await once(server, "close")
+  })
+
+  it("imports a feed and says what it skipped", async () => {
+    const result = await run(["task", "import", `${base}/tasks.json`, "--yes", "--json"])
+    expect(result.exitCode).toBe(0)
+    const data = parse(result.stdout).data
+    expect(data.imported.map((task: { id: string }) => task.id)).toEqual(["task_ship", "task_docs"])
+    expect(data.skipped).toEqual([{ title: "Ship", reason: "repeated_in_feed" }])
+  })
+
+  it("a missing feed is not_found, exit 65, and not transient", async () => {
+    const result = await run(["task", "import", `${base}/gone.json`, "--yes", "--json"])
+    expect(result.exitCode).toBe(65)
+    expect(parse(result.stdout).error).toMatchObject({ code: "not_found", transient: false })
+  })
+
+  it("a feed that needs a token is auth_failure until LASSO_FEED_TOKEN supplies it", async () => {
+    const denied = await run(["task", "import", `${base}/private.json`, "--yes", "--json"])
+    expect(denied.exitCode).toBe(77)
+    expect(parse(denied.stdout).error.fix).toContain("LASSO_FEED_TOKEN")
+    const allowed = await run(["task", "import", `${base}/private.json`, "--yes", "--json"], {
+      env: { LASSO_FEED_TOKEN: "s3cret" },
+    })
+    expect(allowed.exitCode).toBe(0)
+    // The token is a secret: nothing the CLI prints may contain it.
+    expect(`${allowed.stdout}${allowed.stderr}`).not.toContain("s3cret")
   })
 })

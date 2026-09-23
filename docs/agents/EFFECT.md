@@ -12,6 +12,8 @@ Use the docs shipped with the pinned Effect v4 release candidate. Read `node_mod
 - Bound retries by count or elapsed time and retry only recoverable failures. The store retries `error.reason._tag === "AlreadyExists"` for lock contention, but fails immediately on permission errors. Keep `transient` truthful: when a retry cannot succeed (the store reports a lock older than any live holder as `cannot_write`), use a non-transient code whose `fix` says how to clear it.
 - Use `Effect.acquireRelease` inside `Effect.scoped`, or `Effect.acquireUseRelease` for a single guarded operation. Both release resources on interruption. `acquire` itself runs uninterruptibly, so keep it to one attempt and retry around the whole operation; waiting inside `acquire` makes Ctrl-C and SIGTERM wait too (see `StoreWriter.modify`).
 - Define services with `Context.Service` and provide layers at the application boundary. Tests replace them with `Layer.succeed(Service, Service.of({ … }))`.
+- Read configuration with `Config` inside the operation that needs it, not while building a layer: a layer that fails on a bad variable takes every command down with it. Wrap secrets in `Config.Redacted` and pass the `Redacted` value on (`HttpClientRequest.bearerToken` accepts it) instead of unwrapping it.
+- Call HTTP APIs through `HttpClient` from `effect/unstable/http`, never global `fetch`; retry with `HttpClient.retryTransient`, which retries the same failures `httpFailure` marks transient.
 - Use `DateTime.now` (backed by `Clock`, so tests control it) for timestamps. Keep time-dependent metadata out of mutation plans so confirmation tokens remain stable.
 - Guard unknown values with `Predicate` (`isObjectKeyword`, `hasProperty`) instead of hand-written `typeof` and `in` checks.
 

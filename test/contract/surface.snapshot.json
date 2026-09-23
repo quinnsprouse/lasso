@@ -176,6 +176,82 @@
           "idempotency": {
             "kind": "always"
           },
+          "mutates": true,
+          "supportsDryRun": true
+        },
+        "errorCodes": [
+          "auth_failure",
+          "cannot_write",
+          "internal_error",
+          "interrupted",
+          "invalid_config",
+          "invalid_data",
+          "invalid_usage",
+          "not_found",
+          "service_unavailable",
+          "stale_confirmation",
+          "transient_failure"
+        ],
+        "examples": [
+          {
+            "command": "lasso task import https://example.com/tasks.json --dry-run --json",
+            "description": "Preview which tasks the feed would add"
+          },
+          {
+            "command": "lasso task import https://example.com/tasks.json --yes --json",
+            "description": "Import in one step (set LASSO_FEED_TOKEN when the feed needs a token)"
+          }
+        ],
+        "guides": ["task-ids"],
+        "name": "task import",
+        "params": [
+          {
+            "cliName": "<url>",
+            "description": "HTTP(S) URL of a JSON feed: {\"tasks\":[{\"title\":\"…\"}]}",
+            "key": "url",
+            "kind": "argument",
+            "owner": "contract",
+            "required": true,
+            "type": "string"
+          },
+          {
+            "cliName": "--dry-run",
+            "description": "Render the execution plan without applying it",
+            "key": "dryRun",
+            "kind": "flag",
+            "owner": "framework",
+            "required": false,
+            "type": "boolean"
+          },
+          {
+            "cliName": "--confirm",
+            "description": "Confirmation token from a previous run",
+            "key": "confirm",
+            "kind": "flag",
+            "owner": "framework",
+            "required": false,
+            "type": "string"
+          },
+          {
+            "alias": "y",
+            "cliName": "--yes",
+            "description": "Apply without a separate confirmation step",
+            "key": "yes",
+            "kind": "flag",
+            "owner": "framework",
+            "required": false,
+            "type": "boolean"
+          }
+        ],
+        "resultVariants": ["success", "dryRun", "confirmationRequired"],
+        "stability": "experimental",
+        "summary": "Import tasks from a JSON feed at a URL"
+      },
+      {
+        "capabilities": {
+          "idempotency": {
+            "kind": "always"
+          },
           "mutates": false,
           "supportsDryRun": false
         },
@@ -336,12 +412,29 @@
       },
       {
         "brief": "A task id is derived from its title, not assigned by the store. Read this before creating tasks whose ids you need to predict, reference, or de-duplicate.",
-        "commands": ["task create", "task list"],
+        "commands": ["task create", "task import", "task list"],
         "title": "How task ids are derived",
         "topic": "task-ids"
       }
     ],
     "protocol": {
+      "environment": [
+        {
+          "description": "Output format when no flag sets one: auto | json | text | ndjson",
+          "name": "LASSO_FORMAT",
+          "secret": false
+        },
+        {
+          "description": "Bearer token sent with task feed requests (task import)",
+          "name": "LASSO_FEED_TOKEN",
+          "secret": true
+        },
+        {
+          "description": "Time limit for one HTTP call, retries included, e.g. \"10 seconds\" (the default)",
+          "name": "LASSO_HTTP_TIMEOUT",
+          "secret": false
+        }
+      ],
       "errorCatalog": [
         {
           "code": "auth_failure",
@@ -697,6 +790,135 @@
               "type": "object"
             }
           ]
+        }
+      },
+      {
+        "name": "task import",
+        "output": {
+          "$defs": {
+            "lasso/domain/TaskEncoded": {
+              "additionalProperties": false,
+              "properties": {
+                "createdAt": {
+                  "type": "string"
+                },
+                "id": {
+                  "type": "string"
+                },
+                "status": {
+                  "enum": ["open", "done"],
+                  "type": "string"
+                },
+                "title": {
+                  "minLength": 1,
+                  "type": "string"
+                }
+              },
+              "required": ["id", "title", "status", "createdAt"],
+              "type": "object"
+            }
+          },
+          "$schema": "https://json-schema.org/draft/2020-12/schema",
+          "additionalProperties": false,
+          "properties": {
+            "imported": {
+              "items": {
+                "$ref": "#/$defs/lasso~1domain~1TaskEncoded"
+              },
+              "type": "array"
+            },
+            "skipped": {
+              "items": {
+                "additionalProperties": false,
+                "properties": {
+                  "reason": {
+                    "enum": ["already_exists", "repeated_in_feed", "no_identifier"],
+                    "type": "string"
+                  },
+                  "title": {
+                    "type": "string"
+                  }
+                },
+                "required": ["title", "reason"],
+                "type": "object"
+              },
+              "type": "array"
+            }
+          },
+          "required": ["imported", "skipped"],
+          "type": "object"
+        },
+        "params": {
+          "$schema": "https://json-schema.org/draft/2020-12/schema",
+          "additionalProperties": false,
+          "properties": {
+            "confirm": {
+              "description": "Confirmation token from a previous run",
+              "type": "string"
+            },
+            "dryRun": {
+              "description": "Render the execution plan without applying it",
+              "type": "boolean"
+            },
+            "url": {
+              "description": "HTTP(S) URL of a JSON feed: {\"tasks\":[{\"title\":\"…\"}]}",
+              "type": "string"
+            },
+            "yes": {
+              "description": "Apply without a separate confirmation step",
+              "type": "boolean"
+            }
+          },
+          "required": ["url"],
+          "type": "object"
+        },
+        "plan": {
+          "$schema": "https://json-schema.org/draft/2020-12/schema",
+          "additionalProperties": false,
+          "properties": {
+            "adds": {
+              "items": {
+                "additionalProperties": false,
+                "properties": {
+                  "id": {
+                    "type": "string"
+                  },
+                  "status": {
+                    "enum": ["open"],
+                    "type": "string"
+                  },
+                  "title": {
+                    "type": "string"
+                  }
+                },
+                "required": ["id", "title", "status"],
+                "type": "object"
+              },
+              "type": "array"
+            },
+            "skips": {
+              "items": {
+                "additionalProperties": false,
+                "properties": {
+                  "reason": {
+                    "enum": ["already_exists", "repeated_in_feed", "no_identifier"],
+                    "type": "string"
+                  },
+                  "title": {
+                    "type": "string"
+                  }
+                },
+                "required": ["title", "reason"],
+                "type": "object"
+              },
+              "type": "array"
+            },
+            "source": {
+              "type": "string"
+            }
+          },
+          "required": ["source", "adds", "skips"],
+          "type": "object"
         }
       },
       {
