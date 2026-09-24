@@ -10,6 +10,13 @@ updates:
     directory: /
     schedule:
       interval: weekly
+    ignore:
+      # The shipped CLI supports Node 22.19 and newer (package.json engines).
+      # Types from a newer major would let code call APIs Node 22 lacks, so
+      # @types/node takes minor and patch updates only; raise its major together
+      # with engines.node.
+      - dependency-name: "@types/node"
+        update-types: ["version-update:semver-major"]
     groups:
       effect-runtime:
         patterns:
